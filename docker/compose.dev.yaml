@@ -1,0 +1,350 @@
+# Development backing services - the app itself runs under Herd.
+#
+#   docker compose -f docker/compose.dev.yaml up -d
+#   docker compose -f docker/compose.dev.yaml --profile cluster up -d
+#
+# Ports bind to loopback only - on both 127.0.0.1 and [::1], because clients that say `localhost` usually try IPv6 first
+# and would wait out a ~2s timeout per connection if only IPv4 were published.
+# They match .env.example, so the stock env file works unchanged: pgsql on 5432, redis on 6379,
+# SMTP on 2525 (Mailpit UI at http://localhost:8025).
+#
+# The `cluster` profile adds a six-node Redis Cluster on 7000-7005 for exercising REDIS_TOPOLOGY=cluster with
+# REDIS_PORT=7000, plus its own Horizon runner (`horizon-cluster`).
+#
+# The `sentinel` profile adds a real HA pair for exercising REDIS_TOPOLOGY=sentinel with actual failovers:
+# master on 6380, replica on 6381, three sentinels (quorum 2) on 26379-26381, plus `horizon-sentinel`.
+# Host-app .env for it:
+#
+#   REDIS_TOPOLOGY=sentinel
+#   REDIS_SENTINEL_HOSTS=127.0.0.1:26379,127.0.0.1:26380,127.0.0.1:26381
+#
+# Failover drill: redis-cli -p 26379 sentinel failover mymaster - roles stay swapped afterwards
+# (6381 master, 6380 replica) until the next drill or teardown; that is Sentinel behavior, not a bug.
+# Or drill everything at once (sentinel outages, replica outage, both failover kinds) and restore
+# the canonical state afterwards: php artisan redis:sentinel-drill (REDIS_TOPOLOGY=sentinel required).
+#
+# The `horizon` profile runs the Horizon master in Linux (pcntl does not exist on Windows PHP), supervising the same
+# redis queue the Herd-served app dispatches to, set QUEUE_CONNECTION=redis in .env so jobs actually land there, then:
+#
+#   docker compose -f docker/compose.dev.yaml --profile horizon up -d --build
+#
+# Run exactly one Horizon per topology - `horizon` for standalone, `horizon-cluster` for cluster,
+# `horizon-sentinel` for sentinel (the others cannot reach their redis and will crash-loop):
+#
+#   docker compose -f docker/compose.dev.yaml stop horizon
+#   docker compose -f docker/compose.dev.yaml --profile sentinel up -d --build
+
+name: acme-web
+
+services:
+  pgsql:
+    image: postgres:17-alpine
+    ports:
+      - '127.0.0.1:5432:5432'
+      - '[::1]:5432:5432'
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: acme_web
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - pgsql-data:/var/lib/postgresql/data
+    healthcheck:
+      test: [ 'CMD', 'pg_isready', '-U', 'postgres', '-d', 'acme_web' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - '127.0.0.1:6379:6379'
+      - '[::1]:6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: [ 'CMD', 'redis-cli', 'ping' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  mailpit:
+    image: axllent/mailpit:latest
+    ports:
+      # SMTP on 2525 to match MAIL_PORT in .env.example; web UI on 8025.
+      - '127.0.0.1:2525:1025'
+      - '[::1]:2525:1025'
+      - '127.0.0.1:8025:8025'
+      - '[::1]:8025:8025'
+    healthcheck:
+      test: [ 'CMD', 'wget', '-q', '-O-', 'http://127.0.0.1:8025/livez' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.0
+    command: start-dev --import-realm
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_HTTP_PORT: 8080
+      # Makes issuer URLs stable regardless of how you reach it
+      KC_HOSTNAME: http://localhost:8080
+      KC_HEALTH_ENABLED: 'true'
+    ports:
+      - '127.0.0.1:8080:8080'
+      - '[::1]:8080:8080'
+    volumes:
+      # start-dev keeps its embedded H2 database under /opt/keycloak/data;
+      # the named volume carries realms and users across recreations.
+      - keycloak-data:/opt/keycloak/data
+    healthcheck:
+      test: [ "CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && echo -e 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && cat <&3 | grep -q '200 OK'" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  horizon:
+    build: ./horizon
+    profiles: [ 'horizon' ]
+    command: php artisan horizon
+    working_dir: /var/www/html
+    volumes:
+      - ../:/var/www/html
+    environment:
+      # Everything comes from the mounted .env except these addresses: its 127.0.0.1 entries are host-perspective,
+      # and inside this container loopback is the container itself - the services live at their compose DNS names here
+      # (and Mailpit at its real port, not the host-side 2525 mapping). Real environment variables beat .env.
+      REDIS_HOST: redis
+      DB_HOST: pgsql
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+    depends_on:
+      redis:
+        condition: service_healthy
+      pgsql:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    # Give in-flight jobs time to finish; horizon terminates gracefully on the SIGTERM compose sends at stop.
+    stop_grace_period: 60s
+    restart: unless-stopped
+    healthcheck:
+      test: [ 'CMD', 'php', 'artisan', 'horizon:status' ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  redis-cluster:
+    image: grokzen/redis-cluster:7.0.10
+    profiles: [ 'cluster' ]
+    ports:
+      # Only the seed connection benefits from [::1]: after it, cluster
+      # clients follow the node addresses the cluster announces (IPv4).
+      - '127.0.0.1:7000-7005:7000-7005'
+      - '[::1]:7000-7005:7000-7005'
+    environment:
+      # Announce localhost so the host-side phpredis client can follow MOVED redirects to the other nodes.
+      IP: '0.0.0.0'
+      INITIAL_PORT: 7000
+      MASTERS: 3
+      SLAVES_PER_MASTER: 1
+    healthcheck:
+      test: [ 'CMD-SHELL', "redis-cli -p 7000 cluster info | grep -q 'cluster_state:ok'" ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # Horizon for cluster mode (REDIS_TOPOLOGY=cluster): the cluster announces its nodes as 127.0.0.1:7000-7005,
+  # which only resolves to the cluster from the host or from inside the cluster container's own network namespace,
+  # This service joins that namespace instead of the compose network. Run it INSTEAD of `horizon`, which only works standalone.
+  horizon-cluster:
+    build: ./horizon
+    profiles: [ 'cluster' ]
+    command: php artisan horizon
+    working_dir: /var/www/html
+    network_mode: 'service:redis-cluster'
+    volumes:
+      - ../:/var/www/html
+    environment:
+      # Redis needs no override here: the .env's 127.0.0.1:7000 hits the cluster through the shared namespace.
+      # Only the services outside it need their compose DNS names.
+      DB_HOST: pgsql
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+    depends_on:
+      redis-cluster:
+        condition: service_healthy
+      pgsql:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    stop_grace_period: 60s
+    restart: unless-stopped
+    healthcheck:
+      test: [ 'CMD', 'php', 'artisan', 'horizon:status' ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # --- Sentinel profile: 1 master + 1 replica + 3 sentinels (quorum 2) -------------------------
+  # All five containers share the master's network namespace (the horizon-cluster trick): the
+  # 127.0.0.1 addresses in sentinel announcements are then valid both in-namespace and from the
+  # Herd-served host app, and only the namespace owner publishes ports.
+
+  redis-sentinel-master:
+    image: redis:7-alpine
+    profiles: [ 'sentinel' ]
+    command: [ 'redis-server', '--port', '6380' ]
+    ports:
+      # The namespace owner publishes the whole stack's ports; loopback v4+v6 like the other services.
+      - '127.0.0.1:6380:6380'   # master
+      - '[::1]:6380:6380'
+      - '127.0.0.1:6381:6381'   # replica (lives in this namespace)
+      - '[::1]:6381:6381'
+      - '127.0.0.1:26379-26381:26379-26381'   # sentinels
+      - '[::1]:26379-26381:26379-26381'
+    healthcheck:
+      test: [ 'CMD', 'redis-cli', '-p', '6380', 'ping' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-sentinel-replica:
+    image: redis:7-alpine
+    profiles: [ 'sentinel' ]
+    network_mode: 'service:redis-sentinel-master'
+    command: [ 'redis-server', '--port', '6381', '--replicaof', '127.0.0.1', '6380',
+               '--replica-announce-ip', '127.0.0.1', '--replica-announce-port', '6381' ]
+    depends_on:
+      redis-sentinel-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ 'CMD', 'redis-cli', '-p', '6381', 'ping' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Sentinel rewrites its own config file, so each instance generates a private /tmp/sentinel.conf
+  # in its command - no mounts, and recreations start from the canonical monitor definition.
+  redis-sentinel-1:
+    image: redis:7-alpine
+    profiles: [ 'sentinel' ]
+    network_mode: 'service:redis-sentinel-master'
+    command:
+      - sh
+      - -c
+      - |
+        printf '%s\n' \
+          'port 26379' \
+          'sentinel monitor mymaster 127.0.0.1 6380 2' \
+          'sentinel down-after-milliseconds mymaster 5000' \
+          'sentinel failover-timeout mymaster 10000' \
+          'sentinel parallel-syncs mymaster 1' \
+          > /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf
+    depends_on:
+      redis-sentinel-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ 'CMD-SHELL', 'redis-cli -p 26379 sentinel get-master-addr-by-name mymaster | grep -q .' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-sentinel-2:
+    image: redis:7-alpine
+    profiles: [ 'sentinel' ]
+    network_mode: 'service:redis-sentinel-master'
+    command:
+      - sh
+      - -c
+      - |
+        printf '%s\n' \
+          'port 26380' \
+          'sentinel monitor mymaster 127.0.0.1 6380 2' \
+          'sentinel down-after-milliseconds mymaster 5000' \
+          'sentinel failover-timeout mymaster 10000' \
+          'sentinel parallel-syncs mymaster 1' \
+          > /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf
+    depends_on:
+      redis-sentinel-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ 'CMD-SHELL', 'redis-cli -p 26380 sentinel get-master-addr-by-name mymaster | grep -q .' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis-sentinel-3:
+    image: redis:7-alpine
+    profiles: [ 'sentinel' ]
+    network_mode: 'service:redis-sentinel-master'
+    command:
+      - sh
+      - -c
+      - |
+        printf '%s\n' \
+          'port 26381' \
+          'sentinel monitor mymaster 127.0.0.1 6380 2' \
+          'sentinel down-after-milliseconds mymaster 5000' \
+          'sentinel failover-timeout mymaster 10000' \
+          'sentinel parallel-syncs mymaster 1' \
+          > /tmp/sentinel.conf && exec redis-sentinel /tmp/sentinel.conf
+    depends_on:
+      redis-sentinel-master:
+        condition: service_healthy
+    healthcheck:
+      test: [ 'CMD-SHELL', 'redis-cli -p 26381 sentinel get-master-addr-by-name mymaster | grep -q .' ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Horizon for sentinel mode: joins the sentinel stack's namespace so 127.0.0.1 discovery
+  # answers resolve. Run it INSTEAD of `horizon`/`horizon-cluster`.
+  horizon-sentinel:
+    build: ./horizon
+    profiles: [ 'sentinel' ]
+    command: php artisan horizon
+    working_dir: /var/www/html
+    network_mode: 'service:redis-sentinel-master'
+    volumes:
+      - ../:/var/www/html
+    environment:
+      # Pin the topology regardless of the mounted .env; the sentinels are on loopback through the
+      # shared namespace. Services outside it keep their compose DNS names.
+      REDIS_TOPOLOGY: sentinel
+      REDIS_SENTINEL_HOSTS: '127.0.0.1:26379,127.0.0.1:26380,127.0.0.1:26381'
+      DB_HOST: pgsql
+      MAIL_HOST: mailpit
+      MAIL_PORT: 1025
+    depends_on:
+      redis-sentinel-master:
+        condition: service_healthy
+      redis-sentinel-replica:
+        condition: service_healthy
+      redis-sentinel-1:
+        condition: service_healthy
+      redis-sentinel-2:
+        condition: service_healthy
+      redis-sentinel-3:
+        condition: service_healthy
+      pgsql:
+        condition: service_healthy
+      mailpit:
+        condition: service_healthy
+    stop_grace_period: 60s
+    restart: unless-stopped
+    healthcheck:
+      test: [ 'CMD', 'php', 'artisan', 'horizon:status' ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  pgsql-data:
+  redis-data:
+  keycloak-data:

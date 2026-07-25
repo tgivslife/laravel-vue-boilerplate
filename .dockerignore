@@ -1,0 +1,37 @@
+# Rebuilt inside the image
+/vendor
+/node_modules
+/public/build
+
+# A leftover hot file would point @vite at a dev server (security:diagnose fails on it)
+/public/hot
+
+# Never bake local configuration or secrets into an image
+/.env
+/.env.*
+
+# Local runtime state; the directory skeleton survives via the .gitignore negation below
+/storage/framework/cache/data/**
+/storage/framework/sessions/**
+/storage/framework/testing/**
+/storage/framework/views/**
+/storage/logs/**
+/bootstrap/cache/*.php
+!**/.gitignore
+
+# Not needed at runtime
+/.git
+/.github
+/.claude
+/.agents
+/.copilot
+/.continue
+/.codeium
+/.gemini
+/.idea
+/tests
+/docs
+/docker/compose.dev.yaml
+/docker/horizon
+Dockerfile
+.dockerignore
