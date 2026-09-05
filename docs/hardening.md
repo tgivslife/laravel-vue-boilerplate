@@ -200,7 +200,10 @@ Per-provider values for the two URLs (the defaults are Turnstile's):
 - **Queued notifications carry scalar snapshots only**, never models — and mails that matter to account safety (new
   device, lockout, password changed, two-factor changes, magic links) are all queued so response timing reveals nothing.
 - **Secrets at rest**: magic-link tokens and deleted-email membership hashes are APP_KEY-keyed HMACs; TOTP secrets are
-  encrypted; recovery codes and passwords are bcrypt hashes.
+  encrypted; recovery codes and passwords are bcrypt hashes. The three mails that carry a live token in their URL
+  (magic-link, invitation, password-reset) are `ShouldBeEncrypted`, so that same posture extends to the queue: their
+  serialized payload is APP_KEY-encrypted in the backend, `failed_jobs` and Horizon's job view, decrypted only by the
+  worker.
 - **i18n throughout**: English and Romanian for the SPA, API responses and mails (`APP_SUPPORTED_LOCALES`, default
   `en,ro`).
 - **Comma-separated env lists** are trimmed and filtered; empty entries are dropped.
