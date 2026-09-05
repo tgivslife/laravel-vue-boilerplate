@@ -5,6 +5,7 @@ import { useNavigationItems } from '@/composables/useNavigationItems.js'
 import { useUserMenuItems } from '@/composables/useUserMenuItems.js'
 
 const authStore = useAuthStore()
+const route = useRoute()
 
 const open = ref(false)
 
@@ -79,7 +80,11 @@ const userMenuItems = useUserMenuItems(fullName)
              height so content never starts hidden beneath it. -->
         <div class="app-content-column relative flex min-w-0 flex-1 flex-col">
             <AnnouncementBanner class="app-announcement absolute inset-x-0 top-(--ui-header-height)"/>
-            <RouterView/>
+
+            <!-- Keyed by path so a parameter change remounts: detail screens fetch in onMounted
+                 alone, and Vue reusing the component would keep /users/1's data under /users/2's id.
+                 Path, never fullPath - keying on the query would remount on every filter keystroke. -->
+            <RouterView :key="route.path"/>
         </div>
     </UDashboardGroup>
 </template>

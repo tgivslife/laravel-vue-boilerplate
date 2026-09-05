@@ -19,7 +19,9 @@ const router = createRouter({
     // Not import.meta.env.BASE_URL: that is Vite's asset base ('/build/' once built), while the SPA is always served from the domain root.
     history: createWebHistory('/'),
     scrollBehavior (to) {
-        if (to.hash) {
+        // Anchor-shaped hashes only: a fragment carrying state (e.g. "#12/45.9/25.1" for a map camera)
+        // is not a CSS selector, and handing it to querySelector warns and scrolls nowhere.
+        if (to.hash && /^#[A-Za-z][\w-]*$/.test(to.hash)) {
             return { el: to.hash, behavior: 'smooth', top: 60 }
         }
         return { top: 0 }
