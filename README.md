@@ -12,12 +12,13 @@ from a hardened baseline instead of a blank slate.
 **Highlights**
 
 * **Authentication:** passwords, magic links, TOTP two-factor, OIDC single sign-on (any issuer), personal access
-  tokens, login throttling and lockout, enumeration-resistant endpoints
-* **Access control:** deny-by-default RBAC with roles/permissions admin, record-level required permissions,
-  impersonation, and an administrative audit trail
+  tokens, per-credential lockout and per-IP throttling, enumeration-resistant endpoints
+* **Access control:** deny-by-default RBAC with roles/permissions admin, privilege tiers with grant and target
+  ceilings, record-level scoping and required permissions, impersonation, inactive-account auto-closure, and
+  administrative audit trails for users and roles
 * **Self-service settings:** profile, preferences, active sessions, connected identities, authentication log
-* **Operations:** Horizon queues, Redis standalone/cluster/sentinel topologies with failover retries, health probes,
-  security startup diagnostics, CSP/HSTS response headers, Alpine container packaging
+* **Operations:** Horizon queues, Redis standalone/cluster/sentinel topologies with failover retries, an owned `/up`
+  readiness route and health probes, security startup diagnostics, CSP/HSTS response headers, Alpine container packaging
 * **Frontend:** Vue 3 SPA (file-based routes, Pinia, Nuxt UI), localized in English and Romanian
 
 ## ⚙️ Stack / Tools
@@ -64,13 +65,15 @@ Then finish by hand - these cannot be renamed by substitution:
 
 ## 📚 Documentation
 
-* **Docs index:** [docs/README.md](docs/README.md) — per-domain documents covering features and their configuration side
+* **Docs index:** [docs/README.md](docs/README.md) - per-domain documents covering features and their configuration side
   by side, plus an env-variable lookup map
-    * [Authentication](docs/authentication.md) — sign-in doors, password reset, sessions, tokens, authentication log
-    * [Two-factor](docs/two-factor.md) — enrollment, login challenge, the enrollment mandate
-    * [Account lifecycle](docs/account-lifecycle.md) — admin creation, self-provisioning, deletion and tombstoning
-    * [Access control](docs/access-control.md) — RBAC, super admin, lockout invariants, rules, audit trail
-    * [Hardening](docs/hardening.md) — transport, rate limiting, platform conventions
-    * [Deployment](docs/deployment.md) — container image, probes, first-deploy runbook
+    * [Authentication](docs/authentication.md) - sign-in doors, password reset, sessions, tokens, authentication log
+    * [Two-factor](docs/two-factor.md) - enrollment, login challenge, the enrollment mandate
+    * [Account lifecycle](docs/account-lifecycle.md) - admin creation, self-provisioning, deletion and tombstoning
+    * [Access control](docs/access-control.md) - RBAC, privilege tiers, lockout invariants, rules, audit trails
+    * [Record scoping](docs/record-scoping.md) - scope dimensions, per-record policies, building a scoped role
+    * [Hardening](docs/hardening.md) - transport, rate limiting, platform conventions
+    * [Deployment](docs/deployment.md) - container image, probes, first-deploy runbook
+    * [Redis](docs/redis.md) - standalone/sentinel/cluster topologies, failover model, the dev HA stack
 * **Swagger UI:** `/swagger`
 * **OpenAPI Spec:** `/api/docs`

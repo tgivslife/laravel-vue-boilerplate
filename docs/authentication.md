@@ -11,7 +11,7 @@ convention: identical responses whether or not an account exists.
 ## Password login
 
 The classic email + password door (`POST /api/login`), session-based via Sanctum's stateful guard. Disabling it hides
-the password tab on the login page and turns the endpoint into a 404 — useful when a deployment standardizes on magic
+the password tab on the login page and turns the endpoint into a 404 - useful when a deployment standardizes on magic
 links or an identity provider.
 
 Brute-force lockout counts failed attempts per email + IP pair (cleared on success, so legitimate users never accrue
@@ -33,7 +33,7 @@ an inert SPA page; the token is spent only by an explicit button press, so mail 
 The mail shows which device requested the link (anyone can request one for any address).
 
 With `MAGIC_LINK_PROVISION` on, a link requested for an unknown email becomes a signup link: the account is created only
-when the link is consumed — mailbox ownership proven — never at request time, so the send endpoint stays
+when the link is consumed - mailbox ownership proven - never at request time, so the send endpoint stays
 enumeration-resistant and cannot mint accounts for other people's addresses. Signup links carry distinct mail copy and a
 distinct verify-page prompt. What the created account starts with is described
 in [account-lifecycle.md](account-lifecycle.md).
@@ -44,23 +44,23 @@ in [account-lifecycle.md](account-lifecycle.md).
 | `MAGIC_LINK_PROVISION`                               | `false`    | Consuming a link for an unknown email creates the account.                                                  |
 | `MAGIC_LINK_PROVISION_TWO_FACTOR_REQUIRED`           | `false`    | Stamp the two-factor enrollment mandate on accounts this door creates (see [two-factor.md](two-factor.md)). |
 | `MAGIC_LINK_TTL_MINUTES`                             | `15`       | Link lifetime.                                                                                              |
-| `MAGIC_LINK_REQUEST_MAX_ATTEMPTS` / `_DECAY_MINUTES` | `5` / `15` | Request throttle, per target email and per caller IP (every request counts — sending mail is the cost).     |
+| `MAGIC_LINK_REQUEST_MAX_ATTEMPTS` / `_DECAY_MINUTES` | `5` / `15` | Request throttle, per target email and per caller IP (every request counts - sending mail is the cost).     |
 | `MAGIC_LINK_CONSUME_MAX_ATTEMPTS` / `_DECAY_MINUTES` | `10` / `1` | Consume throttle, per IP and per (hashed) token.                                                            |
 
 ## OIDC identity providers
 
 External sign-in via OpenID Connect: Authorization Code + PKCE, nonce, JWKS ID-token validation. Endpoints come from the
-issuer's `/.well-known/openid-configuration` — nothing is configured by hand. A provider is usable only when the master
+issuer's `/.well-known/openid-configuration` - nothing is configured by hand. A provider is usable only when the master
 switch, its own flag and its credentials are all present, so a half-configured provider never exposes a broken login
 door.
 
 Per-provider `link_policy` decides how a provider login maps to a local account:
 
-- `explicit` — only identities previously linked from the settings page may sign in. The safe default: possessing an
+- `explicit` - only identities previously linked from the settings page may sign in. The safe default: possessing an
   external identity grants nothing until the account owner claims it.
-- `email` — a first login auto-links to the existing local account matching the provider's *verified* email claim. Never
+- `email` - a first login auto-links to the existing local account matching the provider's *verified* email claim. Never
   creates accounts.
-- `provision` — a first login creates the account (JIT), gated by a verified email, an optional membership claim, and a
+- `provision` - a first login creates the account (JIT), gated by a verified email, an optional membership claim, and a
   hard refusal of emails that already have an account. Only sane when the provider's directory is itself
   administratively controlled. Details in
   [account-lifecycle.md](account-lifecycle.md).
@@ -78,7 +78,7 @@ Per provider (`ROEID_*` and `ID_PROVIDER_*`):
 |-----------------------------------------------|------------|------------------------------------------------------------------------------------------------------------------------------|
 | `{P}_ENABLED`                                 | `true`     | The provider's own switch.                                                                                                   |
 | `{P}_LINK_POLICY`                             | `explicit` | `explicit`, `email`, or `provision` (above).                                                                                 |
-| `{P}_PROVISION_CLAIM` / `{P}_PROVISION_VALUE` | *(unset)*  | Optional claim gate for `provision`: the token must carry the claim (and value, if set — arrays are matched by containment). |
+| `{P}_PROVISION_CLAIM` / `{P}_PROVISION_VALUE` | *(unset)*  | Optional claim gate for `provision`: the token must carry the claim (and value, if set - arrays are matched by containment). |
 | `{P}_TWO_FACTOR`                              | `skip`     | `skip` trusts the IdP's MFA; `require` parks enrolled accounts for the app challenge.                                        |
 
 Credentials live in `config/services.php`: `{P}_ISSUER`, `{P}_CLIENT_ID`, `{P}_CLIENT_SECRET`,
@@ -126,7 +126,7 @@ by `auth:purge-session-registry`.
 
 Long-lived API tokens for integrating external systems, managed at `/api/tokens`. Management is session-only and
 creation re-confirms the password, so a leaked token can never mint replacements. Every token gets an explicit per-token
-expiry, and abilities are the owner's own permission names — scoping can only restrict access, never extend it.
+expiry, and abilities are the owner's own permission names - scoping can only restrict access, never extend it.
 `sanctum.expiration` must stay null.
 
 | Env                                          | Default     | Meaning                                    |

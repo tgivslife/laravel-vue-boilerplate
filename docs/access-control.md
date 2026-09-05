@@ -5,8 +5,8 @@ Role-based access control on spatie/laravel-permission, with app-side guardrails
 
 ## Vocabulary
 
-Permissions are code-seeded vocabulary — the seeder generates `{resource}.{verb}` names from the
-`resources` map (plus `standalone_permissions` and the lockout permissions) — because they are what the application is
+Permissions are code-seeded vocabulary - the seeder generates `{resource}.{verb}` names from the
+`resources` map (plus `standalone_permissions` and the lockout permissions) - because they are what the application is
 written against. Roles are runtime data, composed in the admin UI. Everything is created and checked in the single
 configured guard; a guard mismatch makes lookups silently miss.
 
@@ -26,30 +26,30 @@ other actor's administrative reach, so their other roles are editable only from 
 Every access mutation goes through one write path (`AccessControlService`): a single transaction serialized on the
 lockout permission rows, verified against the invariants before commit:
 
-- **self-revocation** — the acting admin cannot strip their own effective grant of a lockout permission they held when
+- **self-revocation** - the acting admin cannot strip their own effective grant of a lockout permission they held when
   the mutation began;
-- **last man standing** — a mutation cannot strip a lockout permission's last active holder (super admins count as
+- **last man standing** - a mutation cannot strip a lockout permission's last active holder (super admins count as
   holders of everything; deactivating, banning or deleting the last holder counts as stripping);
-- **target ceiling** — no mutation may touch an account holding the super-admin role or a privileged permission the
+- **target ceiling** - no mutation may touch an account holding the super-admin role or a privileged permission the
   actor lacks (subset semantics: equal-tier admins keep managing each other; super admins bypass). The ceiling reaches
-  the role surface too: a role edit or deletion that would change a privileged permission — strip *or* add one — is
+  the role surface too: a role edit or deletion that would change a privileged permission - strip *or* add one - is
   refused when any holder is out of the actor's reach, so neither demoting an unreachable account through the role it
   holds nor expanding its grants (which also reshapes whom other admins can reach) is a way around it.
-  Only privileged deltas are guarded — roles stay global vocabulary — and super-admin holders are skipped, since
+  Only privileged deltas are guarded - roles stay global vocabulary - and super-admin holders are skipped, since
   `Gate::before` answers for them and what their roles carry changes nothing about their authority;
-- **grant ceiling** — permissions and roles being *added* must sit within what the actor effectively holds (super
+- **grant ceiling** - permissions and roles being *added* must sit within what the actor effectively holds (super
   admins hold everything). Removals are exempt, so a grant above the actor's ceiling stays removable, never re-growable.
 
 The two lockout invariants hold independently for each configured lockout permission.
 
 ## Required-permission rules and dimensions
 
-Whitelisted "protectable" models can carry required-permission rule groups — class-level (all records of a protectable)
-or per-record, per rule type (`view`/`update`/`delete`), with a group mode — managed from the admin UI through a record
+Whitelisted "protectable" models can carry required-permission rule groups - class-level (all records of a protectable)
+or per-record, per rule type (`view`/`update`/`delete`), with a group mode - managed from the admin UI through a record
 browser. Rules rewrite authorization outcomes the way role grants do, so they sit under `roles.manage`.
 
 Deployments can additionally register scope dimensions (`ScopeDimension` implementations) that both narrow `visibleTo()`
-queries and veto single-record access on every surface that asks — the shipped admin user surface among them, scoped
+queries and veto single-record access on every surface that asks - the shipped admin user surface among them, scoped
 end to end through `UserPolicy` and `visibleTo()` (impersonation included). A project with none gets plain RBAC plus
 the rules. How the layers compose, a scoped-role walkthrough and the performance story:
 [record-scoping.md](record-scoping.md).
@@ -60,9 +60,9 @@ the rules. How the layers compose, a scoped-role walkthrough and the performance
   activation, ban state and reason, the two-factor enrollment mandate), role and direct-permission sync, force password
   reset, two-factor reset (owner notified by mail), delete (see [account-lifecycle.md](account-lifecycle.md)); per-user
   session list and authentication log. When impersonation is enabled, `users.impersonate` holders can sign in as a user
-  (session swap with a persistent banner and exit path; access administration, token and credential surfaces — including
-  connecting new sign-in identities — are blocked for the borrowed session). Targets above the actor's tier — super
-  admins and privileged-permission holders — are refused unless the actor is a super admin. Deleted accounts stay reachable
+  (session swap with a persistent banner and exit path; access administration, token and credential surfaces - including
+  connecting new sign-in identities - are blocked for the borrowed session). Targets above the actor's tier - super
+  admins and privileged-permission holders - are refused unless the actor is a super admin. Deleted accounts stay reachable
   read-only: a `deleted` status filter, a read-only detail view, and a membership lookup by original email; audit-trail
   actors keep their names after their own deletion, flagged as deleted.
 - **Roles**: create, rename, delete (never the super-admin role), permission sync.
@@ -71,7 +71,7 @@ the rules. How the layers compose, a scoped-role walkthrough and the performance
 
 ## Audit trail
 
-`AccessAuditor` writes one trail for two kinds of events — the line for what belongs is "events that add or remove a way
+`AccessAuditor` writes one trail for two kinds of events - the line for what belongs is "events that add or remove a way
 into an account, no matter who performed them":
 
 - **Administrative mutations**, recorded inside the guarded transactions with scalar before/after snapshots (no-op
@@ -79,8 +79,8 @@ into an account, no matter who performed them":
   `user.roles_synced`, `user.permissions_synced`, `user.password_reset_forced`,
   `user.two_factor_reset`, `user.deleted`, `role.created`, `role.renamed`, `role.deleted`,
   `role.permissions_synced`, `rules.class_synced`, `rules.record_synced`; impersonation brackets its borrowed-identity
-  window with `user.impersonation_started` / `user.impersonation_ended`. Every exit path writes the `ended` entry —
-  explicit stop, logout, even a mid-flight cutoff — but the marker lives in the session, so a `started` without a
+  window with `user.impersonation_started` / `user.impersonation_ended`. Every exit path writes the `ended` entry -
+  explicit stop, logout, even a mid-flight cutoff - but the marker lives in the session, so a `started` without a
   matching `ended` means the borrowed session was destroyed out-of-band (target deleted, forced reset, expiry), not that
   anything was concealed.
 - **Self-service security events**, with the account owner as actor: `user.two_factor_enabled`,
@@ -88,11 +88,11 @@ into an account, no matter who performed them":
   `user.self_provisioned`, `user.self_deleted`, `user.password_changed`.
 
 Entries carry actor, subject, before/after and IP. Two admin surfaces read them: the per-user trail on an account's
-detail page (`users.view`, plus the record scope on the subject), and the role-surface change feed — the whole role
+detail page (`users.view`, plus the record scope on the subject), and the role-surface change feed - the whole role
 half of the trail, newest first, optionally narrowed to one role (`roles.view`). Roles hard-delete, so the feed is
 where a deleted role's history survives: entries outlive their subject and render its name from the `role.deleted`
 snapshot. On both surfaces an actor the viewer's record scope does not reach is reduced to a `restricted` marker,
-IP included — nothing partial is emitted, because an email is a login handle, a name confirms a guess, and an
+IP included - nothing partial is emitted, because an email is a login handle, a name confirms a guess, and an
 address correlates entries.
 
 The trail holds PII on purpose (before-snapshots retain original emails past the tombstone), so it is
@@ -105,7 +105,7 @@ deployments that must.
 |----------------------------------------------------------------|------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `guard`                                                        | `web`                              | The guard every role/permission is created and checked in.                                                                                               |
 | `super_admin_role`                                             | `super-admin`                      | The break-glass tier described above.                                                                                                                    |
-| `self_provision_roles` (`ACCESS_SELF_PROVISION_ROLES`)         | *(empty)*                          | Defaults for self-provisioned accounts — see [account-lifecycle.md](account-lifecycle.md).                                                               |
+| `self_provision_roles` (`ACCESS_SELF_PROVISION_ROLES`)         | *(empty)*                          | Defaults for self-provisioned accounts - see [account-lifecycle.md](account-lifecycle.md).                                                               |
 | `lockout_permissions`                                          | `users.manage`, `roles.manage`     | The capabilities the self-revocation and last-man-standing invariants protect.                                                                           |
 | `privileged_permissions`                                       | the four admin capabilities        | The capabilities defining the administrative tier: the target ceiling and the impersonation tier read this list, not `lockout_permissions`.              |
 | `resources`                                                    | `users`, `roles` (`view`/`manage`) | The seeded permission vocabulary.                                                                                                                        |

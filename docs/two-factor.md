@@ -11,14 +11,14 @@ bcrypt hashes and shown in plaintext exactly once (with download). Each verified
 so a code can never be replayed.
 
 Starting enrollment, disabling the factor, and regenerating recovery codes are password-confirmed (passwordless accounts
-confirm with the signed-in session — see the password-confirmed actions section
+confirm with the signed-in session - see the password-confirmed actions section
 of [authentication.md](authentication.md)).
 
 ## The login challenge
 
 When a credential-verified login hits an enrolled account, the attempt is parked in the session and the browser is sent
 to the challenge page; the session opens only after a valid TOTP or recovery code, within the challenge TTL. This
-applies to the password door, the magic-link door (the link proves the mailbox, not the second factor — a compromised
+applies to the password door, the magic-link door (the link proves the mailbox, not the second factor - a compromised
 inbox alone must never become an account takeover), and OIDC providers configured with `two_factor => 'require'`
 (providers whose own MFA you trust use `skip`, the default).
 
@@ -33,13 +33,13 @@ authenticate but reaches nothing except the enrollment endpoints until a confirm
 enrollment screen.
 
 The flag is set from user management, or stamped at birth on magic-link-provisioned accounts via
-`MAGIC_LINK_PROVISION_TWO_FACTOR_REQUIRED` — for public deployments where the mailbox would otherwise be the account's
+`MAGIC_LINK_PROVISION_TWO_FACTOR_REQUIRED` - for public deployments where the mailbox would otherwise be the account's
 only factor. Note the distinction from the per-provider OIDC `two_factor`
 knob: that one only challenges factors that already exist; the mandate requires one to exist.
 
 ## Change notifications
 
-The account owner is mailed when the factor is enabled, when it is disabled, and when an administrator resets it — a
+The account owner is mailed when the factor is enabled, when it is disabled, and when an administrator resets it - a
 silent disable is what an account takeover looks like, so this should stay on. Administrative resets are also audited
 (see [access-control.md](access-control.md)).
 

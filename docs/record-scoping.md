@@ -19,7 +19,7 @@ A request must pass every layer that has an opinion. Super admins bypass all thr
 
 ## How a decision is evaluated
 
-Nothing here is a global scope — endpoints opt in explicitly, so queue jobs and console commands that never ask are
+Nothing here is a global scope - endpoints opt in explicitly, so queue jobs and console commands that never ask are
 unaffected by construction. A protectable model opts in by using the
 `HasRequiredPermissions` trait, which provides both forms of the question:
 
@@ -30,7 +30,7 @@ unaffected by construction. A protectable model opts in by using the
   `AccessScope::allowsRecord()`: super-admin bypass, then each dimension's `allows()` veto, then class-level rules, then
   the record's own rules. Out-of-scope records surface as 404, not 403, so identifiers are not probeable.
 
-Both forms must agree — `constrain()` narrows index queries to exactly the records `allows()` would accept. That
+Both forms must agree - `constrain()` narrows index queries to exactly the records `allows()` would accept. That
 symmetry is the one law of the `ScopeDimension` contract.
 
 Both forms walk the same ladder, in the same order. Only the mechanism differs: `visibleTo()` expresses each rung as
@@ -63,30 +63,30 @@ flowchart TD
 
 **Read the stock configuration off that diagram:** with `access.dimensions = []` and no `required_permissions` rows,
 every diamond takes its *none* branch and the answer is always **in scope**. That is why wiring `UserPolicy` into the
-admin surface changed no behaviour — the ladder is connected, but every rung is currently a pass-through. Registering
+admin surface changed no behaviour - the ladder is connected, but every rung is currently a pass-through. Registering
 one dimension activates the second diamond, and the whole surface narrows at once.
 
-## What is wired today — the admin user surface
+## What is wired today - the admin user surface
 
 Because nothing here is a global scope, a dimension only binds the surfaces that ask. The shipped worked example is
 the **admin user surface**: `User` uses `HasRequiredPermissions`, `Policies\UserPolicy` (extending
 `Policies\ResourcePolicy`) is registered for it, and everything under `/api/access/users` asks:
 
-- **Reads and mutations on one record** — show, edit, delete, role/permission sync, force reset, resend invitation,
-  two-factor reset, per-user sessions and logs — authorize per record through the policy. The record-bound form
+- **Reads and mutations on one record** - show, edit, delete, role/permission sync, force reset, resend invitation,
+  two-factor reset, per-user sessions and logs - authorize per record through the policy. The record-bound form
   requests answer the same verdict in `authorize()`, before validation, so an out-of-scope id can never leak a 422
   where an unknown id answers 404.
 - **The index, the CSV export and the stats counts** flow through one `visibleTo()` builder, so the list, the file
   and the numbers cannot diverge; the stats totals count only the actor's slice.
-- **Membership** passes a match — live or retired — through `userCan()` and answers `none` for an out-of-scope
+- **Membership** passes a match - live or retired - through `userCan()` and answers `none` for an out-of-scope
   account, exactly like an unknown address. One caveat holds: membership does not confirm an out-of-scope account,
-  but *creation still collides* — emails are globally unique, so POSTing that address answers a 422 "already taken".
+  but *creation still collides* - emails are globally unique, so POSTing that address answers a 422 "already taken".
   Non-enumeration is therefore not preserved end to end across scope boundaries.
-- **Impersonation** — `ImpersonationService` refuses a target `UserPolicy::impersonate` vetoes (the same
+- **Impersonation** - `ImpersonationService` refuses a target `UserPolicy::impersonate` vetoes (the same
   `allowsRecord()` composition), then applies its stricter tier rule on top.
 - **Creation is deliberately not scoped.** `POST /api/access/users` has no record to scope, and dimensions do not
   constrain creation *into* a slice. The consequence: a created account is reachable afterwards only if the
-  dimension's axis places it in the creator's slice — otherwise the 201 (and its one-time temporary password, when
+  dimension's axis places it in the creator's slice - otherwise the 201 (and its one-time temporary password, when
   that delivery was chosen) is the last the creator sees of it.
 
 Out-of-scope records answer the same 404 an unknown id produces (`denyAsNotFound()`), body-identical apart from the
@@ -105,7 +105,7 @@ flowchart TD
     MW -->|held| BIND
 
     BIND{"SubstituteBindings<br/>resolves :id to a User"}
-    BIND -->|"no such row"| S404["404 — generic body,<br/>no model class name"]
+    BIND -->|"no such row"| S404["404 - generic body,<br/>no model class name"]
     BIND -->|bound| FR
 
     FR{"FormRequest::authorize()<br/>Gate::inspect → UserPolicy"}
@@ -130,10 +130,10 @@ Two distinctions that diagram is worth having for:
 - **403 vs 404.** A missing *capability* is a 403: you may not do this kind of thing, and saying so leaks nothing. A
   record outside your *reach* is a 404: admitting it exists would make the id space probeable.
 - **404 vs 422.** Reach is decided by the policy and answers 404. Rank is decided by the service's ceilings and answers
-  422 with a reason — by then the record is known to be in reach, so naming the obstacle is safe. Reach precedes rank,
+  422 with a reason - by then the record is known to be in reach, so naming the obstacle is safe. Reach precedes rank,
   never the reverse.
 
-Gate 3 exists only where the route binds a record-aware form request — `UserAccountUpdateRequest`,
+Gate 3 exists only where the route binds a record-aware form request - `UserAccountUpdateRequest`,
 `SyncUserRolesRequest`, `SyncPermissionsRequest`, `AuthenticationLogIndexRequest`. Those are exactly the routes that
 validate a payload or query string, which is why they are the ones that need the verdict *before* validation. The
 remaining record routes take a plain `Request` and are covered by gate 4 alone; reads skip validation and the service
@@ -141,7 +141,7 @@ entirely, ending at `authorize('view', …)`.
 
 The tier ceilings (`AccessControlService`'s grant and target checks) are a separate layer and unchanged: they answer
 rank, the scope answers reach, and a mutation must pass both. A deployment adds its axis by registering a
-`User`-claiming dimension — the surface is already listening.
+`User`-claiming dimension - the surface is already listening.
 
 **Dimensions must answer for soft-deleted records too.** The admin read routes resolve tombstoned accounts
 (`withTrashed()` bindings) so deletion audit entries stay readable, and the stats counter combines the scope with
@@ -173,7 +173,7 @@ reach is data entry, not an access mutation.
 4. **Per user, forever after.** Grant `precincts.view` through a role, insert the assignment row. No new roles,
    permissions or code per user.
 
-Extending the same axis to another model (users, stations) is one more `appliesTo()` case — the model inherits the
+Extending the same axis to another model (users, stations) is one more `appliesTo()` case - the model inherits the
 scoping everywhere the access layer is asked.
 
 Two conventions keep dimensions safe:
@@ -188,7 +188,7 @@ Two conventions keep dimensions safe:
 Rules are the runtime-composable layer: rows in `required_permissions` managed from the admin record browser, each
 saying "acting on this protectable requires holding that permission".
 
-- `protectable_type` + `protectable_id` name the target — a null id covers every record of the class, an id locks one
+- `protectable_type` + `protectable_id` name the target - a null id covers every record of the class, an id locks one
   record.
 - `type` is the guarded action, from the `rule_types` vocabulary (`view`/`update`/`delete`).
 - `mode` combines rows into a group: every `all` row is individually required; `any` rows form a pool of which one must
@@ -201,7 +201,7 @@ surface. Rules rewrite authorization outcomes the way role grants do, so the man
 ## Performance characteristics
 
 The layer is built to cost almost nothing when unused and little when used. With no dimensions and no rules,
-`visibleTo()` returns the builder unmodified — result sets are byte-identical to the unscoped query — at the price
+`visibleTo()` returns the builder unmodified - result sets are byte-identical to the unscoped query - at the price
 of two memoized rule-table queries per request (plus the permission load the surface already needed):
 
 - `constrain()` adds a WHERE clause to a query the endpoint was already running; the actor's assignment lookup is one
@@ -210,7 +210,7 @@ of two memoized rule-table queries per request (plus the permission load the sur
   rules at all, letting `visibleTo()` skip its subqueries entirely in the common case. Record verdicts are memoized per
   user/record/action.
 - `AccessScope` is a scoped singleton: every memo lives exactly one request, so revoking access is effective on the next
-  request by construction — no TTL window, no cache invalidation, no persistent store.
+  request by construction - no TTL window, no cache invalidation, no persistent store.
 - The deployment's job is ordinary database hygiene: index the scoping columns (`precincts.county_id`, the assignment
   pivot) like any tenant key.
 
