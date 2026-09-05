@@ -3,6 +3,7 @@
 namespace Tests;
 
 use App\Models\User;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -105,5 +106,35 @@ abstract class TestCase extends BaseTestCase
     protected function sessionExists(string $sessionId): bool
     {
         return app('session')->driver()->getHandler()->read($sessionId) !== '';
+    }
+
+    /**
+     * Asserts the database refuses a write, without poisoning the transaction the test runs in.
+     *
+     * Postgres aborts an entire transaction on a failed statement - every later query answers 25P02,
+     * "current transaction is aborted" - and RefreshDatabase wraps each test in one. So a bare
+     * try/catch around a deliberate constraint violation takes the rest of the test down with it.
+     * Running the write in a nested transaction gives the failure a savepoint to roll back to, leaving
+     * the surrounding one usable.
+     *
+     * @param  callable():mixed  $write  The write the schema is expected to reject.
+     * @param  string  $because  What the failure would mean, reported when the write is accepted.
+     */
+    protected function assertDatabaseRejects(callable $write, string $because): void
+    {
+        try {
+            DB::transaction($write);
+        } catch (QueryException $exception) {
+            // 23xxx is the SQL standard's integrity-constraint class. Asserted rather than merely
+            // caught, because a typo'd column throws QueryException too, and a test that treats any
+            // database error as proof of a constraint holding proves nothing.
+            $this->assertSame('23', substr((string) $exception->getCode(), 0, 2),
+                "Expected an integrity-constraint violation, got SQLSTATE {$exception->getCode()}: "
+                .$exception->getMessage());
+
+            return;
+        }
+
+        $this->fail($because);
     }
 }
