@@ -24,6 +24,10 @@ export class ProblemDetailsError extends Error {
         return this.status === 401
     }
 
+    get isRateLimited () {
+        return this.status === 429
+    }
+
     get isAlreadyAuthenticated () {
         return this.status === 409
     }

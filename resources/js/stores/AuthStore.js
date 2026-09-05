@@ -234,11 +234,13 @@ export const useAuthStore = defineStore('auth', {
         },
 
         /**
-         * Rethrows when the session state could not be determined (retries exhausted); the session is already cleared by then.
+         * Rethrows when the session state could not be determined: retries exhausted (session cleared,
+         * failed closed) or rate limited (session kept, store left uninitialized).
          * Callers decide how to surface the failure - this store never touches the UI.
          */
         async fetchUser () {
             this.isFetchingUser = true
+            let rateLimited = false
             try {
                 const maxRetries = 2
 
@@ -251,6 +253,13 @@ export const useAuthStore = defineStore('auth', {
                         if (error.isUnauthenticated) {
                             this.clearSession()
                             return
+                        }
+
+                        // A 429 says nothing about the session: keep the cached identity (clearing it
+                        // would fake a logout over a live server session) and don't retry into the limit.
+                        if (error.isRateLimited) {
+                            rateLimited = true
+                            throw error
                         }
 
                         if (attempt < maxRetries) {
@@ -266,9 +275,10 @@ export const useAuthStore = defineStore('auth', {
                 }
             } finally {
                 // True even on failure: it means "session resolution finished", not "fetch succeeded".
-                // Leaving it false would make the router guard refetch (and re-toast) on every  navigation
-                // and keep <RbacGuard> in its loading state forever. Recovery: page reload, or a re-login attempt.
-                this.isInitialized = true
+                // Rate limiting is the exception - resolution never happened, so a later navigation retries it.
+                if (!rateLimited) {
+                    this.isInitialized = true
+                }
                 this.isFetchingUser = false
             }
         },
