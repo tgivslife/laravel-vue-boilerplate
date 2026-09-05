@@ -204,6 +204,10 @@ Per-provider values for the two URLs (the defaults are Turnstile's):
   (magic-link, invitation, password-reset) are `ShouldBeEncrypted`, so that same posture extends to the queue: their
   serialized payload is APP_KEY-encrypted in the backend, `failed_jobs` and Horizon's job view, decrypted only by the
   worker.
+- **Session ids at rest**: the `user_sessions` registry stores raw session ids (as Laravel's own database session driver
+  does) — an accepted trade-off, not an oversight. A leaked id is not replayable: the session cookie is APP_KEY-encrypted
+  (`EncryptCookies`), so ids exposed through a backup, a replica or SQL injection are inert without APP_KEY, and the
+  sessions API addresses rows only by SHA-256 digest, so raw ids never leave the server.
 - **i18n throughout**: English and Romanian for the SPA, API responses and mails (`APP_SUPPORTED_LOCALES`, default
   `en,ro`).
 - **Comma-separated env lists** are trimmed and filtered; empty entries are dropped.

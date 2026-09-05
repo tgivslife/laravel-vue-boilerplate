@@ -73,16 +73,24 @@ return Application::configure(basePath: dirname(__DIR__))
         });
 
         /*
-         * Every renderer returns a materialized response (->toResponse($request)), never the bare Responsable:
-         * the fatal-error shutdown path (HandleExceptions::renderHttpResponse) calls ->send() directly on whatever a
-         * renderer returns, bypassing the pipeline that would normally convert a Responsable - a bare JsonErrorResponse
-         * there is a secondary fatal ("Call to undefined method JsonErrorResponse::send()") masking the original error.
+         * Two conventions hold for every renderer below.
+         *
+         * Each returns a materialized response (->toResponse($request)), never the bare Responsable: the
+         * fatal-error shutdown path (HandleExceptions::renderHttpResponse) calls ->send() directly on whatever a
+         * renderer returns, bypassing the pipeline that would normally convert a Responsable - a bare
+         * JsonErrorResponse there is a secondary fatal ("Call to undefined method JsonErrorResponse::send()")
+         * masking the original error.
+         *
+         * The 401/403/404 renderers ignore $e->getMessage(): the framework fills it with internals
+         * (route-model-binding misses carry the model class name, route 404s the attempted path), always in
+         * English. Nothing in the app throws these with an intentional custom message - every abort_unless()
+         * is message-less and no policy uses Response::deny(reason) - so the generic translated copy loses nothing.
          */
         $exceptions->render(static function (NotFoundHttpException $e, Request $request) {
             return new JsonErrorResponse(
                 title: __('api.errors.titles.not_found'),
                 status: $e->getStatusCode(),
-                detail: $e->getMessage() ?: __('api.errors.http.not_found')
+                detail: __('api.errors.http.not_found')
             )->toResponse($request);
         });
 
@@ -90,7 +98,7 @@ return Application::configure(basePath: dirname(__DIR__))
             return new JsonErrorResponse(
                 title: __('api.errors.titles.unauthorized'),
                 status: Response::HTTP_UNAUTHORIZED,
-                detail: $e->getMessage() ?: __('api.errors.http.unauthorized')
+                detail: __('api.errors.http.unauthorized')
             )->toResponse($request);
         });
 
@@ -98,7 +106,7 @@ return Application::configure(basePath: dirname(__DIR__))
             return new JsonErrorResponse(
                 title: __('api.errors.titles.forbidden'),
                 status: Response::HTTP_FORBIDDEN,
-                detail: $e->getMessage() ?: __('api.errors.http.forbidden')
+                detail: __('api.errors.http.forbidden')
             )->toResponse($request);
         });
 
@@ -106,7 +114,7 @@ return Application::configure(basePath: dirname(__DIR__))
             return new JsonErrorResponse(
                 title: __('api.errors.titles.forbidden'),
                 status: Response::HTTP_FORBIDDEN,
-                detail: $e->getMessage() ?: __('api.errors.http.forbidden_access')
+                detail: __('api.errors.http.forbidden_access')
             )->toResponse($request);
         });
 

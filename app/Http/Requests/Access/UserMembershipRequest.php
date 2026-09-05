@@ -2,11 +2,14 @@
 
 namespace App\Http\Requests\Access;
 
+use App\Http\Requests\Concerns\NormalizesEmail;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 
 final class UserMembershipRequest extends FormRequest
 {
+    use NormalizesEmail;
+
     /**
      * Authorization is enforced by the route middleware (the configured
      * admin capability).

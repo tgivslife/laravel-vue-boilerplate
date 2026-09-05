@@ -33,6 +33,24 @@ unaffected by construction. A protectable model opts in by using the
 Both forms must agree — `constrain()` narrows index queries to exactly the records `allows()` would accept. That
 symmetry is the one law of the `ScopeDimension` contract.
 
+## What is wired today — the admin-surface carve-out
+
+Because nothing here is a global scope, a dimension only binds the surfaces that ask. As shipped, those are:
+
+- **Impersonation** — `ImpersonationService` refuses a target `allowsRecord()` vetoes (out-of-scope users 404).
+- **Endpoints the application adds** that call `visibleTo()` / `userCan()`, per the walkthrough below.
+
+The shipped **admin user surface does not ask**: everything under `/api/access/users` (browse, export, show, edit,
+delete, role sync, per-user sessions and logs, force reset, two-factor reset) is gated by `users.view` /
+`users.manage` capabilities alone. A deployment that registers a `User`-claiming dimension therefore bounds
+impersonation but **not** the rest of the admin surface — a tenant-scoped admin could still edit or delete
+out-of-scope accounts there. Until the surface is wired, treat `users.manage` as a deployment-wide trust grant, not
+a tenant-scoped one.
+
+`Policies\ResourcePolicy` is the intended bridge for closing this: extend it (`resource(): 'users'`), register the
+policy for `User`, authorize per record in the admin controllers, and constrain the index/export queries. Wiring it
+is planned; the base class exists so a deployment that needs it sooner can do it themselves.
+
 ## Scope dimensions
 
 A dimension is an application-defined visibility axis (tenant, region, department) registered in

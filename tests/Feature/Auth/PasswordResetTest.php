@@ -43,6 +43,17 @@ class PasswordResetTest extends TestCase
         $this->assertDatabaseCount('password_reset_tokens', 1);
     }
 
+    public function test_request_matches_an_existing_account_regardless_of_email_case(): void
+    {
+        // A case-variant spelling must still reach the account: the enumeration-resistant
+        // response would otherwise hide that no mail was ever sent.
+        $user = $this->createUser(['email' => 'case.test@example.com']);
+
+        $this->requestReset('Case.Test@Example.COM')->assertStatus(202);
+
+        Notification::assertSentTo($user, ResetPasswordNotification::class);
+    }
+
     public function test_request_for_unknown_email_returns_the_identical_response(): void
     {
         $user = $this->createUser();
@@ -124,6 +135,9 @@ class PasswordResetTest extends TestCase
         $user->refresh();
         $this->assertTrue(Hash::check('new-sturdy-passphrase', $user->getAttribute('password')));
         $this->assertNotNull($user->getAttribute('remember_token'));
+        // The recovery path stamps the change like the settings and admin paths do,
+        // so the admin detail view never shows a stale timestamp after a reset.
+        $this->assertNotNull($user->password_changed_at);
         Event::assertDispatched(PasswordReset::class);
     }
 

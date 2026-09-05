@@ -51,6 +51,23 @@ readonly class RequireCaptcha
     protected function guards(string $door): bool
     {
         return (bool) config('security.captcha.enabled', false)
-            && in_array($door, (array) config('security.captcha.doors', []), true);
+            && in_array($door, (array) config('security.captcha.doors', []), true)
+            && $this->doorIsOpen($door);
+    }
+
+    /**
+     * A switched-off door needs no anti-abuse gate: the request can do nothing (the login
+     * controller 404s, the magic-link and reset services no-op), so verifying would burn a
+     * vendor round-trip for it - and answering 422 "captcha failed" on the disabled login
+     * door would reveal an endpoint whose feature switch promises a plain 404.
+     */
+    private function doorIsOpen(string $door): bool
+    {
+        return (bool) match ($door) {
+            'login' => config('security.password_login.enabled', true),
+            'magic_link' => config('security.magic_link.enabled', true),
+            'password_reset' => config('security.password_reset.enabled', true),
+            default => true,
+        };
     }
 }

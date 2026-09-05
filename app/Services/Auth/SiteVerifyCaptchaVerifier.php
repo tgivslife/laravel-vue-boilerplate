@@ -32,7 +32,7 @@ readonly class SiteVerifyCaptchaVerifier implements CaptchaVerifier
         }
 
         try {
-            $response = Http::asForm()->post($url, [
+            $response = Http::asForm()->timeout(10)->connectTimeout(5)->post($url, [
                 'secret' => $secret,
                 'response' => $token,
                 'remoteip' => $ipAddress,

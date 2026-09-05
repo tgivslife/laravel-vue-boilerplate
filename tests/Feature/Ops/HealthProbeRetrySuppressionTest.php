@@ -6,6 +6,7 @@ use App\Services\Ops\HealthCheckService;
 use App\Support\Redis\SentinelRetryPolicy;
 use Illuminate\Contracts\Redis\Factory;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 /**
@@ -32,6 +33,10 @@ class HealthProbeRetrySuppressionTest extends TestCase
     {
         parent::setUp();
 
+        // The provoked probe failures log retry warnings by design; the spy keeps that
+        // expected noise out of laravel.log, so anything landing there is a real anomaly.
+        Log::spy();
+
         $this->bindRecordingRedis();
     }
 
@@ -40,9 +45,10 @@ class HealthProbeRetrySuppressionTest extends TestCase
      */
     private function bindRecordingRedis(): void
     {
-        $client = new class($this->suppressedAtCommand)
-        {
-            public function __construct(public ?bool &$suppressedAtCommand) {}
+        $client = new class($this->suppressedAtCommand) {
+            public function __construct(public ?bool &$suppressedAtCommand)
+            {
+            }
 
             public function __call(string $method, array $arguments): mixed
             {
@@ -57,20 +63,19 @@ class HealthProbeRetrySuppressionTest extends TestCase
             }
         };
 
-        $connection = new class($client) extends \Illuminate\Redis\Connections\PhpRedisConnection
-        {
+        $connection = new class($client) extends \Illuminate\Redis\Connections\PhpRedisConnection {
             public function __construct($client)
             {
                 parent::__construct($client, null, []);
             }
         };
 
-        $factory = new class($connection, $this->suppressedAtResolve) implements Factory
-        {
+        $factory = new class($connection, $this->suppressedAtResolve) implements Factory {
             public function __construct(
                 private readonly object $connection,
                 public ?bool &$suppressedAtResolve,
-            ) {}
+            ) {
+            }
 
             public function connection($name = null)
             {
@@ -101,7 +106,8 @@ class HealthProbeRetrySuppressionTest extends TestCase
         $probe = $this->runProbe('sessions');
 
         $this->assertTrue($probe['ok']);
-        $this->assertTrue($this->suppressedAtResolve, 'opening the connection must be suppressed too - that is where a cold worker spends the budget');
+        $this->assertTrue($this->suppressedAtResolve,
+            'opening the connection must be suppressed too - that is where a cold worker spends the budget');
         $this->assertTrue($this->suppressedAtCommand);
     }
 

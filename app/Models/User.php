@@ -10,6 +10,7 @@ use App\Support\Device;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Translation\HasLocalePreference;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
@@ -72,6 +73,18 @@ class User extends Authenticatable implements HasLocalePreference
             'two_factor_required' => 'boolean',
             'preferences' => 'array',
         ];
+    }
+
+    /**
+     * Emails are lowercase at rest: lookups (login, magic link, password reset, OIDC auto-link, unique validation)
+     * compare with `=` under case-sensitive collations (the default pgsql), so the write side normalizes here - one choke
+     * point covering every path that creates or updates an account, whichever entry point it came through.
+     */
+    protected function email(): Attribute
+    {
+        return Attribute::make(
+            set: static fn(string $value): string => mb_strtolower(trim($value)),
+        );
     }
 
     /**

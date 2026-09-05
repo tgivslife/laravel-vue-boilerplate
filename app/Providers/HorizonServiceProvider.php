@@ -3,7 +3,6 @@
 namespace App\Providers;
 
 use App\Models\User;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Laravel\Horizon\Horizon;
 use Laravel\Horizon\HorizonApplicationServiceProvider;
@@ -28,9 +27,9 @@ class HorizonServiceProvider extends HorizonApplicationServiceProvider
     {
         $this->gate();
 
-        Horizon::auth(static function (Request $request): bool {
-            return Gate::check('viewHorizon', [$request->user()]);
-        });
+        // Gate::check resolves the authenticated user itself;
+        // a guest fails the non-nullable User parameter on the gate closure and is denied.
+        Horizon::auth(static fn(): bool => Gate::check('viewHorizon'));
     }
 
     /**

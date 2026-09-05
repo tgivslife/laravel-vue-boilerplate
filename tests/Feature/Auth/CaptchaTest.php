@@ -48,8 +48,7 @@ class CaptchaTest extends TestCase
 
     private function bindVerifier(bool $passes): void
     {
-        $this->app->instance(CaptchaVerifier::class, new class($passes) implements CaptchaVerifier
-        {
+        $this->app->instance(CaptchaVerifier::class, new class($passes) implements CaptchaVerifier {
             public function __construct(private readonly bool $passes)
             {
             }
@@ -126,6 +125,30 @@ class CaptchaTest extends TestCase
             ->assertStatus(200);
     }
 
+    public function test_a_disabled_door_skips_verification_and_keeps_its_404(): void
+    {
+        $this->enableCaptcha();
+        config(['security.password_login.enabled' => false]);
+
+        // The verifier must never be consulted for a door whose feature switch is off:
+        // that would burn a vendor round-trip for a request that can do nothing.
+        $this->app->instance(CaptchaVerifier::class, new class implements CaptchaVerifier {
+            public function verify(string $token, ?string $ipAddress): bool
+            {
+                throw new \LogicException('The captcha verifier must not run for a disabled door.');
+            }
+        });
+
+        // 404 whatever the token says - a 422 "captcha failed" would reveal the disabled endpoint.
+        $this->withHeader('Referer', config('app.url'))
+            ->postJson('/api/login', ['email' => 'a@example.com', 'password' => 'x'])
+            ->assertStatus(404);
+
+        $this->withHeader('Referer', config('app.url'))
+            ->postJson('/api/login', ['email' => 'a@example.com', 'password' => 'x', 'captcha_token' => 'anything'])
+            ->assertStatus(404);
+    }
+
     public function test_unlisted_doors_stay_open_without_a_token(): void
     {
         $this->enableCaptcha(['login']);
@@ -139,6 +162,9 @@ class CaptchaTest extends TestCase
     {
         // The default siteverify verifier has no secret configured: a deployment
         // that switched captcha on without finishing the job must hear about it.
+        // The 500's exception report is that loud failure; the spy keeps the
+        // expected entry out of laravel.log.
+        Log::spy();
         $this->enableCaptcha();
         config(['security.captcha.secret' => null]);
         $user = $this->createUser();
@@ -148,6 +174,10 @@ class CaptchaTest extends TestCase
 
     public function test_the_siteverify_verifier_speaks_the_shared_protocol(): void
     {
+        // The 503 in the response sequence logs the fail-closed error by design (the
+        // dedicated test below asserts that contract); the spy keeps it out of laravel.log.
+        Log::spy();
+
         config([
             'security.captcha.verify_url' => 'https://captcha.example/siteverify',
             'security.captcha.secret' => 'secret-key',

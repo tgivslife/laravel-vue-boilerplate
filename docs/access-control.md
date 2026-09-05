@@ -44,7 +44,9 @@ or per-record, per rule type (`view`/`update`/`delete`), with a group mode — m
 browser. Rules rewrite authorization outcomes the way role grants do, so they sit under `roles.manage`.
 
 Deployments can additionally register scope dimensions (`ScopeDimension` implementations) that both narrow `visibleTo()`
-queries and veto single-record access. A project with none gets plain RBAC plus the rules. How the layers compose, a
+queries and veto single-record access on the endpoints that consult the scope — app endpoints that opt in, and
+impersonation; the shipped admin user surface is capability-gated only (see the carve-out in
+[record-scoping.md](record-scoping.md)). A project with none gets plain RBAC plus the rules. How the layers compose, a
 scoped-role walkthrough and the performance story:
 [record-scoping.md](record-scoping.md).
 

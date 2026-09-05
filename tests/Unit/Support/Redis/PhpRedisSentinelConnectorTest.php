@@ -5,6 +5,7 @@ namespace Tests\Unit\Support\Redis;
 use App\Support\Redis\PhpRedisSentinelConnection;
 use App\Support\Redis\PhpRedisSentinelConnector;
 use App\Support\Redis\SentinelDiscoveryException;
+use Illuminate\Support\Facades\Log;
 use RedisException;
 use RuntimeException;
 use Tests\TestCase;
@@ -16,6 +17,15 @@ use Tests\TestCase;
  */
 class PhpRedisSentinelConnectorTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Every retry the suite provokes logs a warning by design; the spy keeps that
+        // expected noise out of laravel.log, so anything landing there is a real anomaly.
+        Log::spy();
+    }
+
     /**
      * A connector whose sentinels are scripted: host:port => closure returning an address,
      * returning false, or throwing. Client creation is scripted too: hosts listed in
@@ -25,8 +35,7 @@ class PhpRedisSentinelConnectorTest extends TestCase
      */
     private function connectorWithSentinels(array $sentinels, array $deadMasters = [], array $replicaHosts = []): object
     {
-        return new class($sentinels, $deadMasters, $replicaHosts) extends PhpRedisSentinelConnector
-        {
+        return new class($sentinels, $deadMasters, $replicaHosts) extends PhpRedisSentinelConnector {
             public int $discoveries = 0;
 
             /** @var list<string> Hosts createClient() was asked to connect to. */
@@ -47,9 +56,10 @@ class PhpRedisSentinelConnectorTest extends TestCase
                     throw new RedisException("read error on connection to {$config['host']}:{$config['port']}");
                 }
 
-                return new class(in_array($config['host'], $this->replicaHosts, true) ? 'slave' : 'master')
-                {
-                    public function __construct(private readonly string $role) {}
+                return new class(in_array($config['host'], $this->replicaHosts, true) ? 'slave' : 'master') {
+                    public function __construct(private readonly string $role)
+                    {
+                    }
 
                     /** The connector verifies role:master on every rediscovery. */
                     public function info(string $section): array
@@ -90,8 +100,7 @@ class PhpRedisSentinelConnectorTest extends TestCase
                 $script = $this->sentinels["{$host}:{$port}"]
                     ?? static fn() => throw new RedisException('Connection refused');
 
-                return new class($script)
-                {
+                return new class($script) {
                     public function __construct(private $script)
                     {
                     }
@@ -196,19 +205,19 @@ class PhpRedisSentinelConnectorTest extends TestCase
         ]);
 
         $config = $this->sentinelConfig('s1:26379') + [
-            'url' => 'redis://stale-host:9999',
-            'host' => 'placeholder',
-            'port' => '6379',
-            'password' => 'secret',
-            'database' => '2',
-            'max_retries' => 3,
-            'sentinel_username' => 'ops',
-            'sentinel_password' => 'sentinel-secret',
-            'sentinel_timeout' => 0.25,
-            'retry_attempts' => 5,
-            'retry_delay' => 100,
-            'retry_deadline' => 4000,
-        ];
+                'url' => 'redis://stale-host:9999',
+                'host' => 'placeholder',
+                'port' => '6379',
+                'password' => 'secret',
+                'database' => '2',
+                'max_retries' => 3,
+                'sentinel_username' => 'ops',
+                'sentinel_password' => 'sentinel-secret',
+                'sentinel_timeout' => 0.25,
+                'retry_attempts' => 5,
+                'retry_delay' => 100,
+                'retry_deadline' => 4000,
+            ];
 
         $resolved = $connector->exposeResolveMasterConfig($config);
 
@@ -223,16 +232,16 @@ class PhpRedisSentinelConnectorTest extends TestCase
          * It stays covered because resolveMasterConfig() is reachable directly, as it is right here.
          */
         foreach ([
-            'url',
-            'sentinel_hosts',
-            'sentinel_service',
-            'sentinel_username',
-            'sentinel_password',
-            'sentinel_timeout',
-            'retry_attempts',
-            'retry_delay',
-            'retry_deadline',
-        ] as $stripped) {
+                     'url',
+                     'sentinel_hosts',
+                     'sentinel_service',
+                     'sentinel_username',
+                     'sentinel_password',
+                     'sentinel_timeout',
+                     'retry_attempts',
+                     'retry_delay',
+                     'retry_deadline',
+                 ] as $stripped) {
             $this->assertArrayNotHasKey($stripped, $resolved, "[{$stripped}] must not reach createClient()");
         }
 
@@ -304,8 +313,8 @@ class PhpRedisSentinelConnectorTest extends TestCase
         ]);
 
         $connection = $connector->connect($this->sentinelConfig('s1:26379') + [
-            'host' => 'placeholder', 'port' => '6379', 'retry_delay' => 0,
-        ], []);
+                'host' => 'placeholder', 'port' => '6379', 'retry_delay' => 0,
+            ], []);
 
         $this->assertInstanceOf(PhpRedisSentinelConnection::class, $connection);
         $this->assertSame(['10.0.0.5:6379'], $connector->clientHosts, 'only the promoted node is ever connected to');
@@ -320,8 +329,8 @@ class PhpRedisSentinelConnectorTest extends TestCase
 
         try {
             $connector->connect($this->sentinelConfig('down-a:26379,down-b:26379') + [
-                'host' => 'placeholder', 'port' => '6379', 'retry_delay' => 0,
-            ], []);
+                    'host' => 'placeholder', 'port' => '6379', 'retry_delay' => 0,
+                ], []);
 
             $this->fail('Expected discovery to fail fast.');
         } catch (SentinelDiscoveryException $exception) {
@@ -342,16 +351,18 @@ class PhpRedisSentinelConnectorTest extends TestCase
         $addresses = [['10.0.0.7', '6379'], ['10.0.0.9', '6379'], ['10.0.0.2', '6379']];
 
         $connector = $this->connectorWithSentinels(
-            ['s1:26379' => static function () use (&$addresses) {
-                return array_shift($addresses);
-            }],
+            [
+                's1:26379' => static function () use (&$addresses) {
+                    return array_shift($addresses);
+                }
+            ],
             deadMasters: ['10.0.0.7'],
             replicaHosts: ['10.0.0.9'],
         );
 
         $connection = $connector->connect($this->sentinelConfig('s1:26379') + [
-            'host' => 'placeholder', 'port' => '6379', 'retry_delay' => 0,
-        ], []);
+                'host' => 'placeholder', 'port' => '6379', 'retry_delay' => 0,
+            ], []);
 
         $this->assertInstanceOf(PhpRedisSentinelConnection::class, $connection);
         $this->assertSame(
@@ -370,8 +381,8 @@ class PhpRedisSentinelConnectorTest extends TestCase
         );
 
         $connection = $connector->connect($this->sentinelConfig('s1:26379') + [
-            'host' => 'placeholder', 'port' => '6379', 'retry_delay' => 0,
-        ], []);
+                'host' => 'placeholder', 'port' => '6379', 'retry_delay' => 0,
+            ], []);
 
         $this->assertInstanceOf(PhpRedisSentinelConnection::class, $connection);
         $this->assertSame(['10.0.0.9:6379'], $connector->clientHosts);

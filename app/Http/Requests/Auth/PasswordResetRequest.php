@@ -2,12 +2,15 @@
 
 namespace App\Http\Requests\Auth;
 
+use App\Http\Requests\Concerns\NormalizesEmail;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rules\Password;
 
 final class PasswordResetRequest extends FormRequest
 {
+    use NormalizesEmail;
+
     /**
      * Determine if the user is authorized to make this request.
      */
@@ -20,8 +23,7 @@ final class PasswordResetRequest extends FormRequest
      * Get the validation rules that apply to the request.
      *
      * Token/email correctness is judged by the password broker, not here;
-     * validation only vets the shape so broker failures stay collapsed
-     * into one "invalid" outcome.
+     * Validation only vets the shape so broker failures stay collapsed into one "invalid" outcome.
      *
      * @return array<string, ValidationRule|array<mixed>|string>
      */

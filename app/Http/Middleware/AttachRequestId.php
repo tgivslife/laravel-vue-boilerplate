@@ -16,9 +16,8 @@ use Symfony\Component\HttpFoundation\Response;
  *  2. `X-Correlation-Id` header (fallback, common in AWS/Azure gateways)
  *  3. Generated time-ordered UUID when no valid candidate is found
  *
- * When `request.id.trust_proxy_only` is enabled in config, client-supplied
- * IDs are accepted only for requests that originate from a trusted proxy;
- * all others receive a freshly generated ID regardless.
+ * When `request.id.trust_proxy_only` is enabled in config, client-supplied IDs are accepted only for requests
+ * that originate from a trusted proxy; all others receive a freshly generated ID regardless.
  *
  * The resolved ID is:
  *  - stored in `$request->attributes` under {@see AttachRequestId::ATTRIBUTE}
@@ -26,8 +25,7 @@ use Symfony\Component\HttpFoundation\Response;
  *  - injected into the Laravel log context so every log line carries it
  *  - echoed on the outgoing `X-Request-Id` response header
  *
- * Log context is flushed in a `finally` block so it does not leak into
- * subsequent requests in long-running runtimes such as Laravel Octane.
+ * Log context is flushed in a `finally` block so it does not leak into subsequent requests in long-running runtimes such as Laravel Octane.
  */
 class AttachRequestId
 {
@@ -46,8 +44,7 @@ class AttachRequestId
     /**
      * Handle an incoming request.
      *
-     * Resolves the request ID, propagates it through the request attributes,
-     * request headers, and log context, then echoes it on the response header.
+     * Resolves the request ID, propagates it through the request attributes, request headers, and log context, then echoes it on the response header.
      * Log context is always flushed after the downstream handler returns.
      *
      * @param  Request  $request  The incoming HTTP request.

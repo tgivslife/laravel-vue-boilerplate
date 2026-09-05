@@ -3,6 +3,7 @@
 namespace Tests\Feature\Ops;
 
 use App\Services\Ops\HealthCheckService;
+use Illuminate\Support\Facades\Log;
 use Tests\TestCase;
 
 class HealthEndpointTest extends TestCase
@@ -14,17 +15,23 @@ class HealthEndpointTest extends TestCase
 
     public function test_up_responds_500_when_a_critical_probe_fails(): void
     {
+        // The provoked failure is reported by the exception handler by design; the spy
+        // keeps that expected entry out of laravel.log.
+        Log::spy();
+
         // The service is readonly (Mockery cannot subclass it), so the stub extends it for real.
         $this->app->instance(HealthCheckService::class, new readonly class extends HealthCheckService {
             public function criticalFailures(): array
             {
-                return [[
-                    'name' => 'database',
-                    'ok' => false,
-                    'critical' => true,
-                    'detail' => 'connection refused',
-                    'duration_ms' => 1.0,
-                ]];
+                return [
+                    [
+                        'name' => 'database',
+                        'ok' => false,
+                        'critical' => true,
+                        'detail' => 'connection refused',
+                        'duration_ms' => 1.0,
+                    ]
+                ];
             }
         });
 

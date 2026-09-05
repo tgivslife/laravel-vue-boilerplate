@@ -5,6 +5,7 @@ namespace Tests\Unit\Support\Redis;
 use App\Support\Redis\SentinelDiscoveryException;
 use App\Support\Redis\SentinelFailoverException;
 use App\Support\Redis\SentinelRetryPolicy;
+use Illuminate\Support\Facades\Log;
 use RedisException;
 use RuntimeException;
 use Tests\TestCase;
@@ -17,6 +18,15 @@ use Tests\TestCase;
  */
 class SentinelRetryPolicyTest extends TestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Every retry the suite provokes logs a warning by design; the spy keeps that
+        // expected noise out of laravel.log, so anything landing there is a real anomaly.
+        Log::spy();
+    }
+
     private function policy(int $attempts = 3, int $delayMs = 0, int $deadlineMs = 0): SentinelRetryPolicy
     {
         return new SentinelRetryPolicy($attempts, $delayMs, $deadlineMs);
@@ -73,10 +83,10 @@ class SentinelRetryPolicyTest extends TestCase
         $policy = $this->policy();
 
         foreach ([
-            'WRONGTYPE Operation against a key holding the wrong kind of value',
-            'OOM command not allowed when used memory > maxmemory.',
-            'NOAUTH Authentication required.',
-        ] as $message) {
+                     'WRONGTYPE Operation against a key holding the wrong kind of value',
+                     'OOM command not allowed when used memory > maxmemory.',
+                     'NOAUTH Authentication required.',
+                 ] as $message) {
             $this->assertFalse($policy->isRetryable(new RedisException($message)), $message);
         }
     }

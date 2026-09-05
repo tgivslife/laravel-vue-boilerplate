@@ -47,6 +47,19 @@ class MagicLinkTest extends TestCase
         $this->assertDatabaseCount('magic_link_tokens', 1);
     }
 
+    public function test_request_matches_an_existing_account_regardless_of_email_case(): void
+    {
+        // A case-variant spelling must reach the existing account, not fall through
+        // to the unknown-email path (a silent no-op here, a provisioning link with
+        // the welcome copy on provision-enabled deployments).
+        $user = $this->createUser(['email' => 'case.test@example.com']);
+
+        $this->requestLink('Case.Test@Example.COM')->assertStatus(202);
+
+        Notification::assertSentTo($user, MagicLinkNotification::class);
+        $this->assertSame($user->id, MagicLinkToken::query()->sole()->user_id);
+    }
+
     public function test_request_for_unknown_email_returns_the_identical_response(): void
     {
         $user = $this->createUser();

@@ -9,6 +9,7 @@
 # Never bake local configuration or secrets into an image
 /.env
 /.env.*
+/.mcp.json
 
 # Local runtime state; the directory skeleton survives via the .gitignore negation below
 /storage/framework/cache/data/**

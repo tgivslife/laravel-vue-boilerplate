@@ -107,15 +107,15 @@ class UserAccessController extends Controller
             foreach ($users->lazy() as $user) {
                 fputcsv($out, [
                     $user->getKey(),
-                    $user->first_name,
-                    $user->last_name,
-                    $user->email,
+                    static::spreadsheetSafe($user->first_name),
+                    static::spreadsheetSafe($user->last_name),
+                    static::spreadsheetSafe($user->email),
                     $user->hasVerifiedEmail() ? 'yes' : 'no',
                     $user->deleted_at !== null
                         ? 'deleted'
                         : ($user->banned_at !== null ? 'banned' : ($user->is_active ? 'active' : 'inactive')),
                     $user->hasPendingInvitation() ? 'yes' : 'no',
-                    $user->roles->pluck('name')->sort()->implode('|'),
+                    static::spreadsheetSafe($user->roles->pluck('name')->sort()->implode('|')),
                     $user->last_login_at?->toISOString(),
                     $user->created_at?->toISOString(),
                 ]);
@@ -126,6 +126,20 @@ class UserAccessController extends Controller
             'Content-Type' => 'text/csv; charset=UTF-8',
             'Content-Disposition' => 'attachment; filename="users-'.now()->format('Y-m-d').'.csv"',
         ]);
+    }
+
+    /**
+     * Neutralize spreadsheet formula injection in user-controlled cells: Excel and Sheets evaluate a cell starting with =, +, -, @, tab or CR,
+     * so a user named =HYPERLINK(...) would execute on the admin's machine when the export is opened.
+     * The leading apostrophe makes spreadsheets render the value as literal text.
+     */
+    private static function spreadsheetSafe(?string $value): ?string
+    {
+        if ($value !== null && $value !== '' && str_contains("=+-@\t\r", $value[0])) {
+            return "'".$value;
+        }
+
+        return $value;
     }
 
     /**

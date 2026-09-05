@@ -235,6 +235,13 @@ const twoFactorAvailable = computed(() => authStore.user?.two_factor_available !
 const twoFactorEnabled = computed(() => authStore.user?.two_factor_enabled === true)
 
 const enrollment = ref(null)
+
+/* Rendered via an <img> data URI instead of v-html so the server-built SVG
+ * never becomes an HTML-injection sink (BaconQrCode output is ASCII-only, so btoa is safe). */
+const enrollmentQrUri = computed(() =>
+    enrollment.value ? `data:image/svg+xml;base64,${btoa(enrollment.value.qr_svg)}` : null
+)
+
 const enrollmentCode = ref([])
 const confirmingEnrollment = ref(false)
 const recoveryCodes = ref(null)
@@ -586,7 +593,11 @@ function downloadRecoveryCodes () {
 
                     <div class="flex flex-col sm:flex-row items-center gap-4">
                         <!-- The SVG is black-on-transparent; the white chip keeps it scannable in dark mode. -->
-                        <div class="p-2 bg-white rounded-lg w-fit shrink-0" v-html="enrollment.qr_svg"/>
+                        <img
+                            :src="enrollmentQrUri"
+                            alt=""
+                            class="p-2 bg-white rounded-lg w-fit shrink-0"
+                        >
 
                         <div class="flex flex-col gap-1 min-w-0">
                             <span class="text-xs text-muted">

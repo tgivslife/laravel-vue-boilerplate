@@ -64,6 +64,23 @@ class LoginTest extends TestCase
         $response->assertJsonMissingPath('data.password');
     }
 
+    public function test_login_succeeds_regardless_of_typed_email_case(): void
+    {
+        // Emails are lowercase at rest and lookups are case-sensitive on pgsql;
+        // the request-side normalization must bridge whatever casing the user types.
+        $user = $this->createUser(['email' => 'case.test@example.com']);
+
+        $response = $this
+            ->withHeader('Referer', config('app.url'))
+            ->postJson('/api/login', [
+                'email' => 'Case.Test@Example.COM',
+                'password' => 'password',
+            ]);
+
+        $response->assertStatus(200);
+        $this->assertAuthenticatedAs($user);
+    }
+
     public function test_login_with_unknown_email_returns_invalid_credentials_error(): void
     {
         $response = $this

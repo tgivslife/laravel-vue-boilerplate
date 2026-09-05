@@ -14,15 +14,13 @@ use Illuminate\Support\Str;
  * Built on the framework's password broker, which owns token creation,
  * hashing, expiry and single-use semantics (config/auth.php `passwords.users`).
  *
- * Send side: enumeration-resistant like MagicLinkService - {@see sendResetLink()}
- * returns void no matter what (unknown email, deactivated or banned account,
- * feature disabled), and the mail is queued, so a caller can never observe
- * whether the email belonged to a user. The broker's own resend throttle
- * (`passwords.users.throttle`) dedupes repeat sends server-side.
+ * Send side: enumeration-resistant like MagicLinkService - {@see sendResetLink()} returns void no matter what
+ * (unknown email, deactivated or banned account, feature disabled), and the mail is queued, so a caller can never observe
+ * whether the email belonged to a user.
+ * The broker's own resend throttle (`passwords.users.throttle`) dedupes repeat sends server-side.
  *
- * Reset side: every failure (unknown email, wrong or expired token, account
- * that may not authenticate) collapses into one indistinguishable "invalid"
- * outcome, so the endpoint never becomes an account-state oracle.
+ * Reset side: every failure (unknown email, wrong or expired token, account that may not authenticate) collapses into
+ * one indistinguishable "invalid" outcome, so the endpoint never becomes an account-state oracle.
  */
 readonly class PasswordResetService
 {
@@ -79,6 +77,7 @@ readonly class PasswordResetService
         $status = Password::reset($credentials, function (User $user, string $password): void {
             $user->forceFill([
                 'password' => Hash::make($password),
+                'password_changed_at' => now(),
                 // A reset satisfies an admin-imposed forced reset too.
                 'require_password_reset' => false,
             ])->setRememberToken(Str::random(60));

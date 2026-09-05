@@ -113,7 +113,11 @@ return [
     |--------------------------------------------------------------------------
     |
     | App-registered implementations of Contracts\ScopeDimension, resolved from the container.
-    | Each dimension both narrows visibleTo() queries and vetoes single-record access.
+    | Each dimension both narrows visibleTo() queries and vetoes single-record access - on endpoints that ask.
+    | Only opted-in surfaces consult the scope: app endpoints that call visibleTo()/userCan(), and impersonation.
+    | The shipped admin user surface (browse/export/edit/delete under /api/access) is capability-gated only;
+    | A deployment that scopes User must wire a UserPolicy on top of Policies\ResourcePolicy and authorize per record there.
+    | See docs/record-scoping.md.
     | A project with none gets plain RBAC plus required-permission rules.
     |
     */

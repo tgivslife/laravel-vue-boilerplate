@@ -8,6 +8,7 @@ use App\Notifications\MagicLinkNotification;
 use App\Services\Access\AccessControlService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\AnonymousNotifiable;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Testing\TestResponse;
 use Tests\TestCase;
@@ -175,7 +176,9 @@ class MagicLinkProvisionTest extends TestCase
     public function test_unseeded_default_roles_fail_provisioning_loudly(): void
     {
         // A listed-but-missing role is a deployment misconfiguration: fail, rather
-        // than silently create an empty role that grants nothing.
+        // than silently create an empty role that grants nothing. The 500's exception
+        // report is that loud failure; the spy keeps the expected entry out of laravel.log.
+        Log::spy();
         config(['access.self_provision_roles' => ['member']]);
 
         $token = $this->issueProvisioningToken('newcomer@example.com');
@@ -254,11 +257,13 @@ class MagicLinkProvisionTest extends TestCase
 
     public function test_the_provisioned_email_is_normalized(): void
     {
-        $token = $this->issueProvisioningToken('NewComer@Example.COM');
+        // The request boundary lowercases, so the mail routes to the normalized
+        // address whatever the user typed - and the created account stores it
+        // lowercased, so no case-variant duplicate can ever be provisioned.
+        $token = $this->issueProvisioningToken('newcomer@example.com', typed: 'NewComer@Example.COM');
 
         $this->consume($token)->assertStatus(200);
 
-        // Stored lowercased, so no case-variant duplicate can ever be provisioned.
         $this->assertDatabaseHas('users', ['email' => 'newcomer@example.com']);
         $this->assertDatabaseMissing('users', ['email' => 'NewComer@Example.COM']);
     }
@@ -371,9 +376,9 @@ class MagicLinkProvisionTest extends TestCase
      * Issue a provisioning token for an unknown email through the HTTP endpoint
      * and return the plaintext extracted from the captured on-demand notification.
      */
-    private function issueProvisioningToken(string $email): string
+    private function issueProvisioningToken(string $email, ?string $typed = null): string
     {
-        parse_str((string) parse_url($this->capturedProvisioningUrl($email), PHP_URL_QUERY), $query);
+        parse_str((string) parse_url($this->capturedProvisioningUrl($email, typed: $typed), PHP_URL_QUERY), $query);
 
         $this->assertIsString($query['token'] ?? null);
 
@@ -383,10 +388,13 @@ class MagicLinkProvisionTest extends TestCase
     /**
      * Request a provisioning link and return the action URL captured from the
      * on-demand notification routed to the given address.
+     *
+     * `$typed` requests the link under a different spelling than the expected mail
+     * route, for covering the request-boundary email normalization.
      */
-    private function capturedProvisioningUrl(string $email, ?string $redirect = null): string
+    private function capturedProvisioningUrl(string $email, ?string $redirect = null, ?string $typed = null): string
     {
-        $this->requestLink($email, $redirect)->assertStatus(202);
+        $this->requestLink($typed ?? $email, $redirect)->assertStatus(202);
 
         $url = null;
 

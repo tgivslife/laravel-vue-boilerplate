@@ -41,8 +41,8 @@ in [account-lifecycle.md](account-lifecycle.md).
 | Env                                                  | Default    | Meaning                                                                                                     |
 |------------------------------------------------------|------------|-------------------------------------------------------------------------------------------------------------|
 | `MAGIC_LINK_ENABLED`                                 | `true`     | Master switch; disabling also kills outstanding links.                                                      |
-| `MAGIC_LINK_PROVISION`                               | `true`     | Consuming a link for an unknown email creates the account.                                                  |
-| `MAGIC_LINK_PROVISION_TWO_FACTOR_REQUIRED`           | `true`     | Stamp the two-factor enrollment mandate on accounts this door creates (see [two-factor.md](two-factor.md)). |
+| `MAGIC_LINK_PROVISION`                               | `false`    | Consuming a link for an unknown email creates the account.                                                  |
+| `MAGIC_LINK_PROVISION_TWO_FACTOR_REQUIRED`           | `false`    | Stamp the two-factor enrollment mandate on accounts this door creates (see [two-factor.md](two-factor.md)). |
 | `MAGIC_LINK_TTL_MINUTES`                             | `15`       | Link lifetime.                                                                                              |
 | `MAGIC_LINK_REQUEST_MAX_ATTEMPTS` / `_DECAY_MINUTES` | `5` / `15` | Request throttle, per target email and per caller IP (every request counts — sending mail is the cost).     |
 | `MAGIC_LINK_CONSUME_MAX_ATTEMPTS` / `_DECAY_MINUTES` | `10` / `1` | Consume throttle, per IP and per (hashed) token.                                                            |

@@ -216,7 +216,7 @@ return [
 
     'magic_link' => [
         'enabled' => env('MAGIC_LINK_ENABLED', true),
-        'provision' => env('MAGIC_LINK_PROVISION', true),
+        'provision' => env('MAGIC_LINK_PROVISION', false),
         'provision_two_factor_required' => env('MAGIC_LINK_PROVISION_TWO_FACTOR_REQUIRED', false),
         'ttl_minutes' => env('MAGIC_LINK_TTL_MINUTES', 15),
 

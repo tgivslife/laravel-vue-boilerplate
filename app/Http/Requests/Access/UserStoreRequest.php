@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Access;
 
+use App\Http\Requests\Concerns\NormalizesEmail;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -9,6 +10,8 @@ use Illuminate\Validation\Validator;
 
 final class UserStoreRequest extends FormRequest
 {
+    use NormalizesEmail;
+
     /**
      * Authorization is enforced by the route middleware (the users.manage
      * capability); the lockout invariants live in the service.
