@@ -146,6 +146,27 @@ return [
             ],
         ],
 
+        'inactivity' => [
+            'notice' => [
+                'mail' => [
+                    'subject' => 'Contul tău va fi închis din cauza inactivității',
+                    'heading' => 'Contul tău este programat pentru închidere',
+                    'intro' => 'Contul tău :app nu a mai fost accesat de mult timp, așa că este programat pentru închidere din cauza inactivității.',
+                    'closure_label' => 'Data programată a închiderii',
+                    'keep' => 'Pentru a-ți păstra contul, autentifică-te înainte de această dată - nu este nevoie de nimic altceva.',
+                    'ignore' => 'Dacă nu mai ai nevoie de cont, poți ignora acest email, iar contul va fi închis automat.',
+                ],
+            ],
+            'closed' => [
+                'mail' => [
+                    'subject' => 'Contul tău a fost închis',
+                    'heading' => 'Contul tău a fost închis',
+                    'intro' => 'Contul tău :app a fost închis din cauza inactivității, conform notificării trimise anterior.',
+                    'outro' => 'Închiderea este definitivă, iar contul nu mai poate fi redeschis. Dacă vei avea nevoie de acces în viitor, va fi necesar un cont nou - echipa de suport îți stă la dispoziție pentru orice întrebări.',
+                ],
+            ],
+        ],
+
         'magic_link' => [
             'sent' => 'Cererea ta a fost procesată. Te rugăm să îți verifici căsuța de email pentru linkul de autentificare.',
 

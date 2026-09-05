@@ -49,6 +49,11 @@ Schedule::command('access:purge-audit-logs')->dailyAt('03:40')->onOneServer();
 Schedule::command('audit:purge-logs')->dailyAt('03:50')->onOneServer();
 
 /**
+ * Warn and then retire accounts inactive past the configured closure policy
+ */
+Schedule::command('access:close-inactive-accounts')->dailyAt('08:00')->onOneServer();
+
+/**
  * Flush session registry rows whose sessions have expired
  */
 Schedule::command('auth:purge-session-registry')->hourly()->onOneServer();

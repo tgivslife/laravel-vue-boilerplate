@@ -356,6 +356,13 @@
                 "level_error": "Critical",
                 "message_label": "Message ({locale})"
             },
+            "inactivity_closure": {
+                "enabled_label": "Close inactive accounts automatically",
+                "inactive_days_label": "Inactivity period (days)",
+                "inactive_days_help": "Accounts with no sign-in for this many days are closed.",
+                "notice_days_label": "Notice period (days)",
+                "notice_days_help": "The warning email goes out this many days before closure; signing in cancels it."
+            },
             "report": {
                 "set": "Set",
                 "not_set": "Not set"
@@ -396,6 +403,10 @@
                 "announcement": {
                     "label": "Announcement banner",
                     "description": "A site-wide banner shown to everyone, signed in or not. It only appears while enabled and carrying a message."
+                },
+                "inactivity_closure": {
+                    "label": "Inactive account closure",
+                    "description": "Automatically closes accounts that have not signed in for the configured period. Owners get a warning email first and keep the account by simply signing in; deactivated or banned accounts are never touched."
                 }
             }
         },
@@ -459,6 +470,7 @@
             "not_found": "User not found",
             "not_found_description": "The requested user does not exist or could not be loaded.",
             "last_login_ip": "Last login IP",
+            "inactivity_prenotice": "Inactivation prenotice",
             "banned_at": "Banned since",
             "ban_reason": "Ban reason",
             "yes": "Yes",
@@ -617,6 +629,7 @@
                     "user_self_provisioned": "Account self-registered",
                     "user_self_deleted": "Account self-deleted",
                     "user_deleted": "Account deleted",
+                    "user_inactivity_closed": "Account closed for inactivity",
                     "user_impersonation_started": "Impersonation started",
                     "user_impersonation_ended": "Impersonation ended"
                 }

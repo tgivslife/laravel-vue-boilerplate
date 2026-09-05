@@ -18,6 +18,8 @@
         </include>
     </source>
     <php>
+        <!-- The test suite's cumulative footprint outgrew the 128M CLI default; measured fine at 256M, no single offender. -->
+        <ini name="memory_limit" value="256M"/>
         <env name="APP_ENV" value="testing"/>
         <!-- In-process: the file driver's storage/framework/down is shared with the dev site and any parallel test process. -->
         <env name="APP_MAINTENANCE_DRIVER" value="array"/>

@@ -332,12 +332,14 @@ class AccessAdminApiTest extends AccessTestCase
     {
         $admin = $this->actingAsManager();
         $banned = $this->createUser(['banned_at' => now(), 'ban_reason' => 'Abuse']);
+        $noticed = $this->createUser(['inactivity_notice_sent_at' => now()->subDay()]);
 
         $users = collect($this->getJson('/api/access/users')->assertOk()->json('data.users'))->keyBy('id');
 
         foreach ([
                      'email_verified', 'is_active', 'banned_at', 'ban_reason', 'two_factor_enabled',
                      'require_password_reset', 'password_changed_at', 'last_login_at', 'last_login_ip', 'created_at',
+                     'inactivity_notice_sent_at',
                  ] as $key) {
             $this->assertArrayHasKey($key, $users[$admin->id]);
         }
@@ -348,6 +350,10 @@ class AccessAdminApiTest extends AccessTestCase
 
         $this->assertNotNull($users[$banned->id]['banned_at']);
         $this->assertSame('Abuse', $users[$banned->id]['ban_reason']);
+
+        // The inactivity pre-notice stamp surfaces on the security panel.
+        $this->assertNull($users[$admin->id]['inactivity_notice_sent_at']);
+        $this->assertNotNull($users[$noticed->id]['inactivity_notice_sent_at']);
     }
 
     public function test_the_users_list_is_searchable(): void

@@ -69,6 +69,23 @@ lockout permission's last active holder is refused), and audits
 `user.deleted`; the self-service delete confirms with the password (or typed email for passwordless accounts), audits
 `user.self_deleted` with the owner as actor, and ends the requesting session.
 
+### Inactivity closure
+
+A third door runs the same retirement mechanics on a schedule (`access:close-inactive-accounts`, daily), governed by the
+admin-editable `inactivity_closure` app setting (`{enabled, inactive_days, notice_days}`, disabled by default):
+
+- inactivity is measured against the durable `last_login_at` summary (`created_at` for accounts that never signed in);
+- a pre-closure warning is mailed once, `notice_days` before the earliest possible closure, and stamped in
+  `inactivity_notice_sent_at`; signing in clears the stamp and withdraws the closure;
+- closure happens only after the stamp has aged the full notice window **and** inactivity has reached `inactive_days`,
+  so no account is ever closed with less warning than the notice promised — even when the policy is first enabled
+  against a backlog of long-dead accounts;
+- deactivated and banned accounts are skipped: their owners cannot sign in to stop the clock, so their fate stays an
+  administrator's decision;
+- the closure is audited as `user.inactivity_closed` with the account itself as actor (the `user.self_provisioned`
+  convention for events without a human administrator), and the confirmation mail is routed to the address snapshotted
+  before the email was tombstoned.
+
 **After deletion**, the account remains a read-only record in the admin UI: the users list has a
 `deleted` status filter, the detail page opens for tombstoned accounts (banner, mutations hidden, authentication and
 audit logs readable), and a membership-lookup answers "was this address ever an account?" via the keyed hash. There is

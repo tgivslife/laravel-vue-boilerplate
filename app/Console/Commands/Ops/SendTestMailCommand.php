@@ -3,6 +3,8 @@
 namespace App\Console\Commands\Ops;
 
 use App\Notifications\AccountLockedNotification;
+use App\Notifications\InactivityClosedNotification;
+use App\Notifications\InactivityNoticeNotification;
 use App\Notifications\InvitationNotification;
 use App\Notifications\MagicLinkNotification;
 use App\Notifications\NewDeviceNotification;
@@ -17,18 +19,18 @@ use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Notification as NotificationDispatcher;
 
 /**
- * Sends sample transactional mails to an arbitrary address for reviewing
- * email layouts in a real client.
+ * Sends sample transactional mails to an arbitrary address for reviewing email layouts in a real client.
  *
- * Mails are sent on demand (no user record involved) and synchronously,
- * bypassing the queue, so the result lands immediately via whatever mailer
- * is configured. Sample data uses documentation addresses; the link-carrying
- * mails (magic link, invitation, password reset) hold dummy tokens that
- * cannot be consumed.
+ * Mails are sent on demand (no user record involved) and synchronously, bypassing the queue, so the result lands
+ * immediately via whatever mailer is configured.
+ * Sample data uses documentation addresses; the link-carrying mails (magic link, invitation, password reset) hold
+ * dummy tokens that cannot be consumed.
  */
 #[Signature('mail:send-test
     {email : Address to deliver the test mails to}
-    {--type=all : Which mail to send (all, magic-link, magic-link-signup, invitation, invitation-password, password-reset, password-changed, new-device, new-device-passwordless, lockout, lockout-passwordless, two-factor-enabled, two-factor-disabled, two-factor-disabled-admin)}
+    {--type=all : Which mail to send (all, magic-link, magic-link-signup, invitation, invitation-password, password-reset, password-changed, '.
+    'new-device, new-device-passwordless, lockout, lockout-passwordless, two-factor-enabled, two-factor-disabled, two-factor-disabled-admin, '.
+    'inactivity-notice, inactivity-closed)}
     {--locale= : Locale to render the mails in (defaults to app.locale)}')]
 #[Description('Send sample transactional mails for reviewing email layouts')]
 class SendTestMailCommand extends Command
@@ -161,6 +163,10 @@ class SendTestMailCommand extends Command
                 ipAddress: null,
                 changedAt: now(),
             ),
+            'inactivity-notice' => new InactivityNoticeNotification(
+                closureDate: now()->addDays(30),
+            ),
+            'inactivity-closed' => new InactivityClosedNotification,
         ];
     }
 }

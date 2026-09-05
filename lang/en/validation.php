@@ -197,6 +197,56 @@ return [
     |
     */
 
-    'attributes' => [],
+    'attributes' => [
+        // App-settings registry paths (AppSettings::set validates under a `value` root).
+        'value' => 'setting value',
+        'value.enabled' => 'enabled state',
+        'value.level' => 'severity',
+        'value.message' => 'message',
+        'value.message.*' => 'message',
+        'value.inactive_days' => 'inactivity period (days)',
+        'value.notice_days' => 'notice period (days)',
+
+        // Admin list filters: dotted paths would otherwise render verbatim in the message.
+        'filter.search' => 'search filter',
+        'filter.status' => 'status filter',
+        'filter.role_id' => 'role filter',
+        'filter.two_factor' => 'two-factor filter',
+        'filter.onboarding' => 'onboarding filter',
+
+        // Application request fields (kept in lockstep with lang/ro/validation.php).
+        'email' => 'email address',
+        'password' => 'password',
+        'current_password' => 'current password',
+        'date' => 'date',
+        'first_name' => 'first name',
+        'last_name' => 'last name',
+        'name' => 'name',
+        'code' => 'code',
+        'recovery_code' => 'recovery code',
+        'token' => 'token',
+        'type' => 'type',
+        'mode' => 'mode',
+        'remember' => 'remember me option',
+        'redirect' => 'redirect address',
+        'delivery' => 'delivery method',
+        'abilities' => 'token abilities',
+        'abilities.*' => 'token ability',
+        'per_page' => 'page size',
+        'ban_reason' => 'ban reason',
+        'banned' => 'ban state',
+        'email_verified' => 'email verified state',
+        'expires_in_days' => 'expiration (days)',
+        'is_active' => 'account active state',
+        'permission_ids' => 'permissions',
+        'permission_ids.*' => 'permission',
+        'role_ids' => 'roles',
+        'role_ids.*' => 'role',
+        'require_password_reset' => 'forced password reset',
+        'revoke_other_sessions' => 'sign out other sessions',
+        'two_factor_required' => 'two-factor requirement',
+        'locale' => 'language',
+        'theme' => 'theme',
+    ],
 
 ];

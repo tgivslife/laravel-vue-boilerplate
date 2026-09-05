@@ -146,6 +146,27 @@ return [
             ],
         ],
 
+        'inactivity' => [
+            'notice' => [
+                'mail' => [
+                    'subject' => 'Your account will be closed due to inactivity',
+                    'heading' => 'Your account is scheduled for closure',
+                    'intro' => 'Your :app account has not been signed in to for a long time, so it is scheduled to be closed due to inactivity.',
+                    'closure_label' => 'Scheduled closure date',
+                    'keep' => 'To keep your account, simply sign in before that date - nothing else is needed.',
+                    'ignore' => 'If you no longer need the account, you can ignore this email and the account will be closed automatically.',
+                ],
+            ],
+            'closed' => [
+                'mail' => [
+                    'subject' => 'Your account has been closed',
+                    'heading' => 'Your account has been closed',
+                    'intro' => 'Your :app account has been closed due to inactivity, as announced in the notice we sent earlier.',
+                    'outro' => 'The closure is permanent and the account cannot be reopened. If you need access again in the future, a new account will be needed - our support team is happy to help if you have any questions.',
+                ],
+            ],
+        ],
+
         'magic_link' => [
             'sent' => 'Your request has been processed. Please check your inbox for the sign-in link.',
 

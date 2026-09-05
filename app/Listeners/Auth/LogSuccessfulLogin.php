@@ -15,23 +15,17 @@ use Illuminate\Support\Facades\RateLimiter;
 /**
  * Records successful logins and flags logins from unknown devices.
  *
- * Also maintains the denormalized last_login_at/last_login_ip summary on
- * the users table: the log itself is purged after the retention period,
- * so the user row keeps a durable "last seen" that survives pruning (and
- * keeps updating even when logging is disabled).
+ * Also maintains the denormalized last_login_at/last_login_ip summary on the users table: the log itself is purged
+ * after the retention period, so the user row keeps a durable "last seen" that survives pruning.
  *
- * Session restorations are folded into the existing row: the remember-me
- * recaller re-fires the Login event, so an active session from the same
- * device within the configured window only bumps last_activity_at instead
- * of logging a new episode - and does not refresh the last-login summary.
+ * Session restorations are folded into the existing row: the remember-me recaller re-fires the Login event, so an active
+ * session from the same device within the configured window only bumps last_activity_at instead of logging a new episode,
+ * and does not refresh the last-login summary.
  *
- * The body is rescue()-wrapped: this listener observes authentication and
- * must never be the reason a login fails.
+ * The body is rescue()-wrapped: this listener observes authentication and must never be the reason a login fails.
  *
- * Impersonation swaps are ignored entirely: the Login event fired by the
- * guard is a session changing hands, not the account owner signing in.
- * Recording it would write the admin's device into the target's history,
- * corrupt the last-login summary, and mail the target a new-device alert.
+ * Impersonation swaps are ignored entirely: the Login event fired by the guard is a session changing hands, not the account owner signing in.
+ * Recording it would write the admin's device into the target's history, corrupt the last-login summary, and mail the target a new-device alert.
  */
 readonly class LogSuccessfulLogin
 {
@@ -82,9 +76,8 @@ readonly class LogSuccessfulLogin
             $this->rememberLastLogin($user);
 
             /*
-             * Only notify when there is history to compare against: a user's
-             * first recorded login (including every existing user's first
-             * login after this feature ships) defines their known device
+             * Only notify when there is history to compare against: a user's first recorded login
+             * (including every existing user's first login after this feature ships) defines their known device
              * rather than alerting on it.
              */
             if ($hasLoginHistory && !$isKnownDevice && $user->canAuthenticate()) {
@@ -104,9 +97,10 @@ readonly class LogSuccessfulLogin
     /**
      * Maintain the denormalized last-login summary on the user row.
      *
-     * Saved quietly and without timestamps: a login is account activity,
-     * not a profile update, so it must bump neither updated_at nor fire
-     * model events.
+     * Saved quietly and without timestamps: a login is account activity, not a profile update, so it must bump
+     * neither updated_at nor fire model events.
+     *
+     * Signing in also withdraws a pending inactivity-closure notice: the pre-notice mail promises the account survives if its owner returns.
      */
     private function rememberLastLogin(User $user): void
     {
@@ -114,6 +108,7 @@ readonly class LogSuccessfulLogin
             $user->forceFill([
                 'last_login_at' => now(),
                 'last_login_ip' => $this->request->ip(),
+                'inactivity_notice_sent_at' => null,
             ])->saveQuietly();
         });
     }
@@ -121,8 +116,7 @@ readonly class LogSuccessfulLogin
     /**
      * Fold a session restoration into its original row.
      *
-     * Returns true when an active session from this device was recently
-     * alive, in which case only last_activity_at is bumped.
+     * Returns true when an active session from this device was recently alive, in which case only last_activity_at is bumped.
      */
     private function touchRestoredSession(User $user, string $deviceId): bool
     {

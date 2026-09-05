@@ -49,6 +49,10 @@ return new class extends Migration {
             $table->timestamp('last_login_at')->nullable();
             $table->string('last_login_ip', 45)->nullable();
 
+            // When the inactivity pre-notice was mailed; cleared on sign-in. An account is only
+            // auto-closed after this stamp has aged past the configured notice window.
+            $table->timestamp('inactivity_notice_sent_at')->nullable();
+
             $table->rememberToken();
             $table->timestamps();
             $table->softDeletes();

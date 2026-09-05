@@ -80,9 +80,8 @@ function messageLimitOf (entry) {
 }
 
 /*
- * The draft as the API expects it: empty inputs mean "no value" (the nullable
- * rules expect null, not ''), and the announcement drops locales whose
- * message is blank instead of persisting empty strings.
+ * The draft as the API expects it: empty inputs mean "no value" (the nullable rules expect null, not ''),
+ * and the announcement drops locales whose message is blank instead of persisting empty strings.
  */
 function draftValue (entry) {
     const value = drafts[entry.key]
@@ -92,9 +91,17 @@ function draftValue (entry) {
             enabled: value?.enabled === true,
             level: value?.level ?? 'info',
             message: Object.fromEntries(
-                Object.entries(value?.message ?? {})
-                    .filter(([, text]) => typeof text === 'string' && text.trim() !== '')
+                Object.entries(value?.message ?? {}).
+                    filter(([, text]) => typeof text === 'string' && text.trim() !== ''),
             ),
+        }
+    }
+
+    if (entry.type === 'inactivity_closure') {
+        return {
+            enabled: value?.enabled === true,
+            inactive_days: value?.inactive_days ?? null,
+            notice_days: value?.notice_days ?? null,
         }
     }
 
@@ -132,8 +139,8 @@ async function save (entry) {
             color: 'success',
         })
     } catch (error) {
-        // Validation failures carry the useful text per field (e.g. the
-        // message length limit); the envelope's detail is only a fallback.
+        // Validation failures carry the useful text per field (e.g. the message length limit);
+        // the envelope's detail is only a fallback.
         toast.add({
             title: t('messages.access.save_failed'),
             description: error.errors?.[0]?.detail
@@ -181,6 +188,11 @@ onMounted(loadSettings)
                     v-if="entry.type === 'announcement'"
                     v-model="drafts[entry.key]"
                     :message-limit="messageLimitOf(entry)"
+                />
+
+                <AccessInactivityClosureEditor
+                    v-else-if="entry.type === 'inactivity_closure'"
+                    v-model="drafts[entry.key]"
                 />
 
                 <UInput

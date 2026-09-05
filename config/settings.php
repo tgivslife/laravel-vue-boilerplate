@@ -64,6 +64,18 @@ return [
             ],
             'public' => true,
         ],
+        'inactivity_closure' => [
+            'type' => 'inactivity_closure',
+            'default' => ['enabled' => false, 'inactive_days' => 365, 'notice_days' => 30],
+            'rules' => ['required', 'array:enabled,inactive_days,notice_days'],
+            'nested' => [
+                'enabled' => ['required', 'boolean'],
+                'inactive_days' => ['required', 'integer', 'min:30', 'max:3650'],
+                // Nested rules validate under the submitted value, so the cross-field reference is value.*.
+                'notice_days' => ['required', 'integer', 'min:1', 'lt:value.inactive_days'],
+            ],
+            // Internal retirement policy: never exposed on the public bootstrap endpoint.
+        ],
     ],
 
     /*

@@ -356,6 +356,13 @@
                 "level_error": "Critic",
                 "message_label": "Mesaj ({locale})"
             },
+            "inactivity_closure": {
+                "enabled_label": "Închide automat conturile inactive",
+                "inactive_days_label": "Perioada de inactivitate (zile)",
+                "inactive_days_help": "Conturile fără nicio autentificare în acest număr de zile sunt închise.",
+                "notice_days_label": "Perioada de preaviz (zile)",
+                "notice_days_help": "Emailul de avertizare se trimite cu acest număr de zile înainte de închidere; autentificarea o anulează."
+            },
             "report": {
                 "set": "Setat",
                 "not_set": "Nesetat"
@@ -396,6 +403,10 @@
                 "announcement": {
                     "label": "Banner de anunțuri",
                     "description": "Un banner afișat tuturor, autentificați sau nu. Apare doar cât timp este activat și are un mesaj."
+                },
+                "inactivity_closure": {
+                    "label": "Închiderea conturilor inactive",
+                    "description": "Închide automat conturile care nu s-au autentificat în perioada configurată. Deținătorii primesc mai întâi un email de avertizare și își păstrează contul prin simpla autentificare; conturile dezactivate sau blocate nu sunt niciodată atinse."
                 }
             }
         },
@@ -459,6 +470,7 @@
             "not_found": "Utilizatorul nu a fost găsit",
             "not_found_description": "Utilizatorul solicitat nu există sau nu a putut fi încărcat.",
             "last_login_ip": "IP-ul ultimei autentificări",
+            "inactivity_prenotice": "Preaviz de inactivare",
             "banned_at": "Blocat din",
             "ban_reason": "Motivul blocării",
             "yes": "Da",
@@ -617,6 +629,7 @@
                     "user_self_provisioned": "Cont auto-înregistrat",
                     "user_self_deleted": "Cont șters de utilizator",
                     "user_deleted": "Cont șters",
+                    "user_inactivity_closed": "Cont închis pentru inactivitate",
                     "user_impersonation_started": "Impersonare începută",
                     "user_impersonation_ended": "Impersonare încheiată"
                 }

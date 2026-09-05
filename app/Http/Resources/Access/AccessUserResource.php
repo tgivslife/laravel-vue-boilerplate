@@ -64,6 +64,7 @@ final class AccessUserResource extends JsonResource
             'last_login_ip' => $user->last_login_ip,
             'created_at' => $user->created_at?->toISOString(),
             'deleted_at' => $user->deleted_at?->toISOString(),
+            'inactivity_notice_sent_at' => $user->inactivity_notice_sent_at?->toISOString(),
             'roles' => NamedResource::collection($user->roles),
             'direct_permissions' => NamedResource::collection($user->permissions),
             'effective_permissions' => $this->when(

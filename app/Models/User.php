@@ -67,6 +67,7 @@ class User extends Authenticatable implements HasLocalePreference
             'is_active' => 'boolean',
             'banned_at' => 'datetime',
             'last_login_at' => 'datetime',
+            'inactivity_notice_sent_at' => 'datetime',
             'two_factor_secret' => 'encrypted',
             'two_factor_recovery_codes' => 'array',
             'two_factor_confirmed_at' => 'datetime',

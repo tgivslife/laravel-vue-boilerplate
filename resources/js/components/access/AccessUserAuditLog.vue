@@ -77,6 +77,7 @@ const actionMeta = {
     'user.self_provisioned': { icon: 'i-tabler-user-check' },
     'user.self_deleted': { icon: 'i-tabler-user-x' },
     'user.deleted': { icon: 'i-tabler-trash' },
+    'user.inactivity_closed': { icon: 'i-tabler-user-off' },
     'user.impersonation_started': { icon: 'i-tabler-user-shield', accent: IMPERSONATION_ACCENT },
     'user.impersonation_ended': { icon: 'i-tabler-logout', accent: IMPERSONATION_ACCENT },
 }

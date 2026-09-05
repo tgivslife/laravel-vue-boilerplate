@@ -9,21 +9,22 @@ use App\Services\Settings\AppSettings;
 class AppSettingsTest extends AccessTestCase
 {
     /**
-     * Register a throwaway scalar setting: the generic store behaviors (override round-trip,
-     * audit, no-op, reset, cache) are exercised against this instead of a shipped registry
-     * entry, so trimming the real registry never silently drops their coverage.
+     * Register a throwaway scalar setting: the generic store behaviors (override round-trip, audit, no-op, reset, cache)
+     * are exercised against this instead of a shipped registry entry, so trimming the real registry never silently drops their coverage.
      */
     private function registerContactEmailSetting(): void
     {
-        config(['settings.app' => [
-            ...config('settings.app'),
-            'contact_email' => [
-                'type' => 'email',
-                'default' => null,
-                'rules' => ['nullable', 'email'],
-                'public' => false,
-            ],
-        ]]);
+        config([
+            'settings.app' => [
+                ...config('settings.app'),
+                'contact_email' => [
+                    'type' => 'email',
+                    'default' => null,
+                    'rules' => ['nullable', 'email'],
+                    'public' => false,
+                ],
+            ]
+        ]);
     }
 
     public function test_the_settings_surface_requires_the_manage_capability(): void
@@ -67,9 +68,11 @@ class AppSettingsTest extends AccessTestCase
         $this->assertSame($payload, app(AppSettings::class)->get('announcement'));
 
         // Submitting the registry default resets: the override row disappears.
-        $this->putJson('/api/access/settings/announcement', ['value' => [
-            'enabled' => false, 'level' => 'info', 'message' => [],
-        ]])->assertOk();
+        $this->putJson('/api/access/settings/announcement', [
+            'value' => [
+                'enabled' => false, 'level' => 'info', 'message' => [],
+            ]
+        ])->assertOk();
 
         $this->assertDatabaseCount('app_settings', 0);
     }
@@ -79,19 +82,45 @@ class AppSettingsTest extends AccessTestCase
         $this->actingAsStateful($this->userWithPermissions('settings.manage'));
 
         // An unknown severity level.
-        $this->putJson('/api/access/settings/announcement', ['value' => [
-            'enabled' => true, 'level' => 'urgent', 'message' => [],
-        ]])->assertStatus(422)->assertJsonPath('errors.0.name', 'value.level');
+        $this->putJson('/api/access/settings/announcement', [
+            'value' => [
+                'enabled' => true, 'level' => 'urgent', 'message' => [],
+            ]
+        ])->assertStatus(422)->assertJsonPath('errors.0.name', 'value.level');
 
         // A message keyed by an unsupported locale.
-        $this->putJson('/api/access/settings/announcement', ['value' => [
-            'enabled' => true, 'level' => 'info', 'message' => ['fr' => 'Bonjour'],
-        ]])->assertStatus(422)->assertJsonPath('errors.0.name', 'value.message');
+        $this->putJson('/api/access/settings/announcement', [
+            'value' => [
+                'enabled' => true, 'level' => 'info', 'message' => ['fr' => 'Bonjour'],
+            ]
+        ])->assertStatus(422)->assertJsonPath('errors.0.name', 'value.message');
 
         // A key outside the announcement shape.
-        $this->putJson('/api/access/settings/announcement', ['value' => [
-            'enabled' => true, 'level' => 'info', 'message' => [], 'dismissible' => true,
-        ]])->assertStatus(422)->assertJsonPath('errors.0.name', 'value');
+        $this->putJson('/api/access/settings/announcement', [
+            'value' => [
+                'enabled' => true, 'level' => 'info', 'message' => [], 'dismissible' => true,
+            ]
+        ])->assertStatus(422)->assertJsonPath('errors.0.name', 'value');
+    }
+
+    public function test_the_inactivity_closure_notice_must_be_shorter_than_the_inactivity_period(): void
+    {
+        $this->actingAsStateful($this->userWithPermissions('settings.manage'));
+
+        $this->putJson('/api/access/settings/inactivity_closure', [
+            'value' => [
+                'enabled' => true, 'inactive_days' => 90, 'notice_days' => 90,
+            ]
+        ])->assertStatus(422)
+            ->assertJsonPath('errors.0.name', 'value.notice_days')
+            // The registry path resolves to its validation.attributes label, not the raw dot path.
+            ->assertJsonPath('errors.0.detail', 'The notice period (days) field must be less than 90.');
+
+        $this->putJson('/api/access/settings/inactivity_closure', [
+            'value' => [
+                'enabled' => true, 'inactive_days' => 90, 'notice_days' => 30,
+            ]
+        ])->assertOk()->assertJsonPath('data.value.inactive_days', 90);
     }
 
     public function test_updating_a_setting_stores_the_override_and_audits_it(): void
@@ -223,11 +252,13 @@ class AppSettingsTest extends AccessTestCase
         $_ENV['DEMO_SERVICE_TOKEN'] = 'super-secret';
 
         try {
-            config(['settings.environment' => [
-                'secret_suffixes' => ['_TOKEN'],
-                'secrets' => [],
-                'categories' => ['demo' => ['APP_ENV', 'DEMO_SERVICE_TOKEN', 'DEMO_MISSING_VAR']],
-            ]]);
+            config([
+                'settings.environment' => [
+                    'secret_suffixes' => ['_TOKEN'],
+                    'secrets' => [],
+                    'categories' => ['demo' => ['APP_ENV', 'DEMO_SERVICE_TOKEN', 'DEMO_MISSING_VAR']],
+                ]
+            ]);
 
             $this->actingAsStateful($this->userWithPermissions('settings.manage'));
 

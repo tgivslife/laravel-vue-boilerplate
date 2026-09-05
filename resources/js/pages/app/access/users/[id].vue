@@ -686,6 +686,12 @@ async function saveAccess () {
                                         <dt class="text-muted">{{ t('messages.access.users.last_login_ip') }}</dt>
                                         <dd class="text-highlighted text-right">{{ user.last_login_ip ?? '—' }}</dd>
                                     </div>
+                                    <div class="flex items-baseline justify-between gap-4">
+                                        <dt class="text-muted">{{ t('messages.access.users.inactivity_prenotice') }}</dt>
+                                        <dd class="text-highlighted text-right">
+                                            {{ user.inactivity_notice_sent_at ? formatDateTime(user.inactivity_notice_sent_at) : '—' }}
+                                        </dd>
+                                    </div>
                                     <div v-if="user.banned_at" class="flex items-baseline justify-between gap-4">
                                         <dt class="text-muted">{{ t('messages.access.users.banned_at') }}</dt>
                                         <dd class="text-highlighted text-right">{{
