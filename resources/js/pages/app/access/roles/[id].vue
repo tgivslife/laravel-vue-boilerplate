@@ -42,9 +42,8 @@ const canManage = computed(() => can('roles.manage') && !role.value?.protected)
 
 /* Permissions above the signed-in admin's own ceiling: the server refuses adding them to a
  * role, so the picker locks them for adding (they stay removable). */
-const ungrantablePermissionNames = computed(() => permissions.value
-    .filter(permission => !can(permission.name))
-    .map(permission => permission.name))
+const ungrantablePermissionNames = computed(
+    () => permissions.value.filter(permission => !can(permission.name)).map(permission => permission.name))
 
 /* Editable state, re-synced from the server after every mutation. */
 const editedName = ref('')
@@ -179,8 +178,9 @@ function sameSet (a, b) {
 const permissionsDirty = computed(() => role.value !== null
     && !sameSet(selectedPermissionIds.value, role.value.permissions.map(permission => permission.id)))
 
+/* Only the transfer list, not applyRole(): a pending rename on the profile tab must survive cancelling (or failing) a permission edit. */
 function resetPermissions () {
-    applyRole(role.value)
+    selectedPermissionIds.value = role.value.permissions.map(permission => permission.id)
 }
 
 async function savePermissions () {
@@ -196,6 +196,8 @@ async function savePermissions () {
 
         await refreshOwnGrants()
     } catch (error) {
+        /* The server refused and rolled back, so the transfer list must snap back to what the role still grants */
+        resetPermissions()
         mutationErrorToast(error)
     } finally {
         savingPermissions.value = false
@@ -361,7 +363,7 @@ async function savePermissions () {
                                         <p class="text-sm text-muted mt-1">
                                             {{
                                                 t('messages.access.roles.delete_description', {
-                                                    users: role.users_count
+                                                    users: role.users_count,
                                                 })
                                             }}
                                         </p>

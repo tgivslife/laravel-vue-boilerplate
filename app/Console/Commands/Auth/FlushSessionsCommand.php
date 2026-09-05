@@ -10,14 +10,11 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 
 /**
- * Destroys every session in the configured session store and clears the
- * session registry, signing every user out at once.
+ * Destroys every session in the configured session store and clears the session registry, signing every user out at once.
  *
- * Two uses: as a deployment step when the session registry shipped (sessions
- * created before it are not indexed and would otherwise survive
- * account-recovery purges until they expire), and as an incident lever -
- * "force re-login for everyone" after a leaked APP_KEY or a compromised
- * account.
+ * Two uses: as a deployment step when the session registry shipped (sessions created before it are not indexed and
+ * would otherwise survive account-recovery purges until they expire), and as an incident lever - "force re-login for everyone"
+ * after a leaked APP_KEY or a compromised account.
  *
  * How the store is emptied depends on the session driver:
  *  - database: deletes every row of the sessions table.

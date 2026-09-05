@@ -66,6 +66,11 @@ final class AccessScope
     private ?array $dimensions = null;
 
     /**
+     * The super-admin role's id; `false` until looked up, null when the install never seeded it.
+     */
+    private int|false|null $superAdminRoleId = false;
+
+    /**
      * Whether the user holds the configured super-admin role.
      */
     public function isSuperAdmin(Authenticatable $user): bool
@@ -144,6 +149,27 @@ final class AccessScope
         $privileged = array_intersect(config('access.privileged_permissions', []), $this->permissionNames($target));
 
         return array_diff($privileged, $this->permissionNames($actor)) !== [];
+    }
+
+    /**
+     * The configured super-admin role's id, resolved once per request.
+     *
+     * Every access mutation needs it more than once - the membership assertion and both holder snapshots - and the
+     * row cannot move underneath them: creating or renaming a role into the super-admin name is refused, and so is
+     * deleting it. `false` is the not-yet-looked-up marker, so an install without the role does not re-query either.
+     */
+    public function superAdminRoleId(): ?int
+    {
+        if ($this->superAdminRoleId === false) {
+            $role = config('permission.models.role')::query()
+                ->where('name', config('access.super_admin_role'))
+                ->where('guard_name', config('access.guard'))
+                ->first();
+
+            $this->superAdminRoleId = $role === null ? null : (int) $role->getKey();
+        }
+
+        return $this->superAdminRoleId;
     }
 
     /**
@@ -269,6 +295,7 @@ final class AccessScope
         $this->permissionNames = [];
         $this->superAdmin = [];
         $this->dimensions = null;
+        $this->superAdminRoleId = false;
         $this->flushRules();
     }
 

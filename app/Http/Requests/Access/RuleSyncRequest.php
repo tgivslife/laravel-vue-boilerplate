@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Access;
 
+use App\Rules\AllExistInGuard;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -30,12 +31,11 @@ final class RuleSyncRequest extends FormRequest
         return [
             'type' => ['required', 'string', Rule::in(config('access.rule_types'))],
             'mode' => ['required', 'string', Rule::in(['all', 'any'])],
-            'permission_ids' => ['present', 'array'],
-            'permission_ids.*' => [
-                'integer',
-                Rule::exists(config('permission.table_names.permissions'), 'id')
-                    ->where('guard_name', config('access.guard')),
+            'permission_ids' => [
+                'present', 'array',
+                new AllExistInGuard(config('permission.table_names.permissions')),
             ],
+            'permission_ids.*' => ['integer:strict'],
         ];
     }
 }

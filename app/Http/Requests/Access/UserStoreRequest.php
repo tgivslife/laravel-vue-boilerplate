@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Access;
 
 use App\Http\Requests\Concerns\NormalizesEmail;
+use App\Rules\AllExistInGuard;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -34,12 +35,11 @@ final class UserStoreRequest extends FormRequest
             'last_name' => ['required', 'string', 'max:255'],
             'email' => ['required', 'string', 'email', 'max:255', 'unique:users,email'],
             'delivery' => ['sometimes', 'string', Rule::in($this->allowedDeliveries())],
-            'role_ids' => ['sometimes', 'array'],
-            'role_ids.*' => [
-                'integer',
-                Rule::exists(config('permission.table_names.roles'), 'id')
-                    ->where('guard_name', config('access.guard')),
+            'role_ids' => [
+                'sometimes', 'array',
+                new AllExistInGuard(config('permission.table_names.roles')),
             ],
+            'role_ids.*' => ['integer:strict'],
         ];
     }
 

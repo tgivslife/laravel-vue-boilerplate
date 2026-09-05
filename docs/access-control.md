@@ -31,7 +31,11 @@ lockout permission rows, verified against the invariants before commit:
 - **last man standing** — a mutation cannot strip a lockout permission's last active holder (super admins count as
   holders of everything; deactivating, banning or deleting the last holder counts as stripping);
 - **target ceiling** — no mutation may touch an account holding the super-admin role or a privileged permission the
-  actor lacks (subset semantics: equal-tier admins keep managing each other; super admins bypass);
+  actor lacks (subset semantics: equal-tier admins keep managing each other; super admins bypass). The ceiling reaches
+  the role surface too: a role edit or deletion that would strip a privileged permission is refused when any holder is
+  out of the actor's reach, so demoting an unreachable account through the role it holds is not a way around it.
+  Only privileged removals are guarded — roles stay global vocabulary — and super-admin holders are skipped, since
+  `Gate::before` answers for them and what their roles carry changes nothing about their authority;
 - **grant ceiling** — permissions and roles being *added* must sit within what the actor effectively holds (super
   admins hold everything). Removals are exempt, so a grant above the actor's ceiling stays removable, never re-growable.
 

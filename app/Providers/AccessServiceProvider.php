@@ -6,8 +6,10 @@ use App\Models\User;
 use App\Policies\UserPolicy;
 use App\Services\Access\AccessScope;
 use Illuminate\Contracts\Auth\Access\Authorizable;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 
 class AccessServiceProvider extends ServiceProvider
@@ -31,6 +33,24 @@ class AccessServiceProvider extends ServiceProvider
         $this->enforceMorphMap();
         $this->registerSuperAdminBypass();
         $this->registerPolicies();
+        $this->bindRolesWithinGuard();
+    }
+
+    /**
+     * Resolve {role} within the configured guard.
+     *
+     * The browsers already filter on guard_name, but implicit binding resolves by key alone - so the moment a deployment
+     * adds a second guard, its roles would be reachable through the detail, rename, delete and permission-sync endpoints
+     * while staying invisible in the list they were reached from.
+     * One binding rather than a filter repeated in each controller method, which is how that asymmetry arose.
+     *
+     * A miss throws ModelNotFoundException, which the framework renders as the same 404 an unknown id gives.
+     */
+    private function bindRolesWithinGuard(): void
+    {
+        Route::bind('role', static fn(string $value): Model => config('permission.models.role')::query()
+            ->where('guard_name', config('access.guard'))
+            ->findOrFail($value));
     }
 
     /**

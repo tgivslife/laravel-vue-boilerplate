@@ -147,6 +147,94 @@ class AccessEscalationTest extends AccessTestCase
         $this->assertFalse($ops->fresh()->hasPermissionTo('settings.manage'));
     }
 
+    public function test_a_role_edit_cannot_strip_a_privileged_grant_from_an_out_of_reach_holder(): void
+    {
+        // The role surface is the ceiling's back door: the actor cannot touch the target directly, but the
+        // target's privileged grant arrives through a role, and editing that role reaches them all the same.
+        $this->actingAsHolderOf('users.manage', 'roles.manage');
+
+        $ops = config('permission.models.role')::findOrCreate('ops', config('access.guard'));
+        $ops->givePermissionTo('settings.manage');
+
+        $target = $this->createUser();
+        $target->assignRole($ops);
+
+        $this->patchJson("/api/access/users/{$target->id}", ['first_name' => 'Hijacked'])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.0.detail', __('api.access.target_above_tier'));
+
+        // Its own message: the refusal is about a role, so "managing this account" would describe nothing
+        // the admin is looking at - and the blocking holder stays unnamed either way.
+        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", ['permission_ids' => []])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.0.detail', __('api.access.role_holder_above_tier'));
+
+        $this->assertTrue($ops->fresh()->hasPermissionTo('settings.manage'));
+        $this->assertTrue($target->fresh()->can('settings.manage'));
+    }
+
+    public function test_a_role_cannot_be_deleted_out_from_under_an_out_of_reach_holder(): void
+    {
+        // Deletion strips everything the role carried, so it is the same demotion by another name.
+        $this->actingAsHolderOf('users.manage', 'roles.manage');
+
+        $ops = config('permission.models.role')::findOrCreate('ops', config('access.guard'));
+        $ops->givePermissionTo('settings.manage');
+
+        $target = $this->createUser();
+        $target->assignRole($ops);
+
+        $this->deleteJson("/api/access/roles/{$ops->getKey()}")
+            ->assertStatus(422)
+            ->assertJsonPath('errors.0.detail', __('api.access.role_holder_above_tier'));
+
+        $this->assertNotNull($ops->fresh());
+        $this->assertTrue($target->fresh()->can('settings.manage'));
+    }
+
+    public function test_a_role_edit_still_reaches_holders_within_the_actors_tier(): void
+    {
+        // The guard is scoped to the removals that move a tier, so ordinary role curation is untouched:
+        // an equal-tier holder stays reachable, and a non-privileged grant leaves without a ceiling check.
+        $this->actingAsHolderOf('users.manage', 'roles.manage');
+
+        $ops = config('permission.models.role')::findOrCreate('ops', config('access.guard'));
+        $ops->syncPermissions([$this->permission('users.manage'), $this->permission('widgets.a')]);
+
+        $peer = $this->createUser();
+        $peer->assignRole($ops);
+
+        // A privileged removal from a peer: subset semantics, so the peer never outranked the actor.
+        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", ['permission_ids' => [
+            $this->permission('widgets.a')->getKey(),
+        ]])->assertOk();
+
+        $this->assertFalse($peer->fresh()->can('users.manage'));
+
+        // A non-privileged removal needs no holder scan at all.
+        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", ['permission_ids' => []])
+            ->assertOk();
+
+        $this->assertFalse($peer->fresh()->can('widgets.a'));
+    }
+
+    public function test_a_role_held_by_a_super_admin_stays_editable(): void
+    {
+        // Gate::before answers for super admins, so what their roles carry changes nothing about their
+        // authority - counting them as out-of-reach holders would privilege-lock every role they hold.
+        $this->actingAsHolderOf('users.manage', 'roles.manage');
+
+        $ops = config('permission.models.role')::findOrCreate('ops', config('access.guard'));
+        $ops->givePermissionTo('users.manage');
+
+        $this->superAdmin()->assignRole($ops);
+
+        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", ['permission_ids' => []])
+            ->assertOk();
+
+        $this->assertFalse($ops->fresh()->hasPermissionTo('users.manage'));
+    }
+
     public function test_a_minted_account_cannot_exceed_its_creator(): void
     {
         $this->actingAsHolderOf('users.manage');

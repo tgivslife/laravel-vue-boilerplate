@@ -68,25 +68,27 @@ function applyUser (freshUser) {
     user.value = freshUser
     firstName.value = freshUser.first_name ?? ''
     lastName.value = freshUser.last_name ?? ''
+    applyGrants(freshUser)
+}
+
+/* The grant half on its own: the access editor must not reach into the profile tab's inputs, so a pending rename survives cancelling (or failing) a grant edit. */
+function applyGrants (freshUser) {
+    user.value = freshUser
     selectedRoleIds.value = freshUser.roles.map(role => role.id)
     selectedPermissionIds.value = freshUser.direct_permissions.map(permission => permission.id)
 }
 
 /* Super-admin membership is only managed outside the API (seeder/console). */
-const protectedRoleNames = computed(() => roles.value
-    .filter(role => role.protected)
-    .map(role => role.name))
+const protectedRoleNames = computed(() => roles.value.filter(role => role.protected).map(role => role.name))
 
-/* Grants above the signed-in admin's own ceiling: the server refuses adding them, so the
- * picker locks them for adding (they stay removable). The protected check runs first - the
- * super-admin role carries no attached permissions and would otherwise read as grantable. */
-const ungrantableRoleNames = computed(() => roles.value
-    .filter(role => !role.protected && (role.permissions ?? []).some(permission => !can(permission.name)))
-    .map(role => role.name))
+/* Grants above the signed-in admin's own ceiling: the server refuses adding them, so the picker locks them for adding (they stay removable).
+ * The protected check runs first - the super-admin role carries no attached permissions and would otherwise read as grantable. */
+const ungrantableRoleNames = computed(() => roles.value.filter(
+    role => !role.protected && (role.permissions ?? []).some(permission => !can(permission.name))).
+    map(role => role.name))
 
-const ungrantablePermissionNames = computed(() => permissions.value
-    .filter(permission => !can(permission.name))
-    .map(permission => permission.name))
+const ungrantablePermissionNames = computed(
+    () => permissions.value.filter(permission => !can(permission.name)).map(permission => permission.name))
 
 const inheritedPermissions = computed(() => {
     if (!user.value) {
@@ -396,16 +398,20 @@ const accessDirty = computed(() => user.value !== null && (
 ))
 
 function resetAccess () {
-    applyUser(user.value)
+    applyGrants(user.value)
 }
 
 async function saveAccess () {
     savingAccess.value = true
+
+    /* Held outside the try: the two halves are separate requests, so the catch needs whatever the
+     * server last returned - a roles sync that landed before the permissions sync was refused is
+     * committed state, not something to roll back on screen. */
+    let data = null
+
     try {
         /* Only the halves that changed are sent - an unchanged sync would
          * be a no-op request the audit trail rightly ignores. */
-        let data = null
-
         if (!sameSet(selectedRoleIds.value, user.value.roles.map(role => role.id))) {
             data = await accessService.syncUserRoles(user.value.id, selectedRoleIds.value)
         }
@@ -413,7 +419,7 @@ async function saveAccess () {
             data = await accessService.syncUserPermissions(user.value.id, selectedPermissionIds.value)
         }
         if (data) {
-            applyUser(data.user)
+            applyGrants(data.user)
         }
 
         toast.add({
@@ -426,6 +432,9 @@ async function saveAccess () {
             await authStore.fetchUser()
         }
     } catch (error) {
+        /* The refused sync rolled back server-side, so the editor must snap back to what the account
+         * actually holds - leaving the attempted edit on screen reads as a save that worked. */
+        applyGrants(data?.user ?? user.value)
         mutationErrorToast(error)
     } finally {
         savingAccess.value = false
@@ -544,7 +553,8 @@ async function saveAccess () {
                                 <span class="flex items-center gap-1.5">
                                     <UIcon name="i-tabler-key" class="size-4"/>
                                     {{
-                                        t('messages.access.users.direct_count', { count: user.direct_permissions.length })
+                                        t('messages.access.users.direct_count',
+                                            { count: user.direct_permissions.length })
                                     }}
                                 </span>
                             </div>

@@ -205,10 +205,9 @@ class RoleController extends Controller
     }
 
     /**
-     * Holder counts read from the pivot directly. Spatie's Role::users()
-     * resolves its related model from the request's default guard, which
-     * auth:sanctum rewrites to the provider-less runtime `sanctum` guard -
-     * withCount('users') would fatal here.
+     * Holder counts read from the pivot directly.
+     * Spatie's Role::users() resolves its related model from the request's default guard, which auth:sanctum rewrites
+     * to the provider-less runtime `sanctum` guard - withCount('users') would fatal here.
      *
      * @return array<int, int>
      */

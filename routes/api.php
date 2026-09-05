@@ -204,16 +204,21 @@ Route::middleware([
         Route::get('roles', [RoleController::class, 'index'])->name('roles.index');
         // The literal segment must register before the {role} wildcard.
         Route::get('roles/stats', [RoleController::class, 'stats'])->name('roles.stats');
-        Route::get('roles/{role}', [RoleController::class, 'show'])->name('roles.show');
+        // Numeric ids only: the binding compares against a bigint key, so a non-numeric segment would
+        // reach the database and surface as a 500 rather than the 404 an unknown role gives.
+        Route::get('roles/{role}', [RoleController::class, 'show'])->whereNumber('role')->name('roles.show');
         Route::get('permissions', [PermissionController::class, 'index'])->name('permissions.index');
         Route::get('permissions/stats', [PermissionController::class, 'stats'])->name('permissions.stats');
     });
 
     Route::middleware('can:roles.manage')->group(function () {
         Route::post('roles', [RoleController::class, 'store'])->name('roles.store');
-        Route::patch('roles/{role}', [RoleController::class, 'update'])->name('roles.update');
-        Route::delete('roles/{role}', [RoleController::class, 'destroy'])->name('roles.destroy');
-        Route::put('roles/{role}/permissions', [RoleController::class, 'syncPermissions'])->name('roles.permissions');
+        Route::patch('roles/{role}', [RoleController::class, 'update'])
+            ->whereNumber('role')->name('roles.update');
+        Route::delete('roles/{role}', [RoleController::class, 'destroy'])
+            ->whereNumber('role')->name('roles.destroy');
+        Route::put('roles/{role}/permissions', [RoleController::class, 'syncPermissions'])
+            ->whereNumber('role')->name('roles.permissions');
 
         Route::get('protectables', [ProtectableController::class, 'index'])->name('protectables.index');
         Route::get('protectables/{alias}/rules',

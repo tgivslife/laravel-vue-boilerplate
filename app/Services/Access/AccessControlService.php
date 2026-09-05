@@ -9,6 +9,7 @@ use App\Services\Auth\MagicLinkService;
 use App\Services\Auth\SessionRegistry;
 use App\Services\Auth\TwoFactorService;
 use Closure;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -26,7 +27,8 @@ use Spatie\Permission\PermissionRegistrar;
  *
  *  - self-revocation: the acting admin cannot strip their own effective grant of a lockout permission they held when the mutation began;
  *  - last man standing: a mutation cannot strip a lockout permission's last active holder (super admins count as holders of everything);
- *  - target ceiling: no mutation may touch an account holding the super-admin role or a privileged permission the actor lacks;
+ *  - target ceiling: no mutation may touch an account holding the super-admin role or a privileged permission the actor lacks -
+ *    including indirectly, through a role edit that would strip a privileged permission from such an account;
  *  - grant ceiling: permissions and roles being added must sit within what the actor effectively holds.
  *
  * The lockout invariants hold independently for each configured lockout permission.
@@ -52,17 +54,21 @@ final readonly class AccessControlService
      */
     public function syncUserRoles(User $actor, User $target, array $roleIds): void
     {
-        $this->assertSuperAdminMembershipUnchanged($target, $roleIds);
-
         $this->mutate($actor, $target, function () use ($actor, $target, $roleIds): void {
             $roles = $this->roleModel()::whereIn('id', $roleIds)->get();
 
             $before = $target->roles()->pluck('name')->sort()->values()->all();
-            // The grant ceiling runs in here rather than before mutate() (where the membership assertion sits) because
-            // the added-delta needs the before-state, read inside the transaction under the same lock.
+
+            /*
+             * Both ceilings read the pre-mutation state from $before, inside the transaction and under the same
+             * lock - the membership assertion used to run ahead of mutate(), where a concurrent grant could
+             * change the answer between the check and the write, and where createUser() already ran it inside.
+             */
+            $this->assertSuperAdminMembershipUnchanged($roleIds, $before);
             $this->assertMayGrantRoles($actor, $roles->filter(
                 static fn(RoleContract $role): bool => !in_array($role->name, $before, true)
             ));
+
             $target->syncRoles($roles);
             $after = $target->roles()->pluck('name')->sort()->values()->all();
 
@@ -201,7 +207,8 @@ final readonly class AccessControlService
                 $user->save();
 
                 if ($roleIds !== []) {
-                    $this->assertSuperAdminMembershipUnchanged($user, $roleIds);
+                    // A brand-new account holds nothing, so the only membership change this can express is a grant.
+                    $this->assertSuperAdminMembershipUnchanged($roleIds, []);
                     $roles = $this->roleModel()::whereIn('id', $roleIds)->get();
                     $this->assertMayGrantRoles($actor, $roles);
                     $user->syncRoles($roles);
@@ -411,7 +418,8 @@ final readonly class AccessControlService
 
     /**
      * Delete a role (never the super-admin role).
-     * The invariants still apply: deleting the only path to a lockout permission's last active holder is refused.
+     * The invariants still apply: deleting the only path to a lockout permission's last active holder is refused,
+     * and deletion strips every permission the role carried, so the holder ceiling answers for all of them.
      */
     public function deleteRole(User $actor, RoleContract $role): void
     {
@@ -423,6 +431,8 @@ final readonly class AccessControlService
                 'permissions' => $role->permissions()->pluck('name')->sort()->values()->all(),
                 'users' => $role->users()->count(),
             ];
+
+            $this->assertRoleHoldersWithinTier($actor, $role, $before['permissions']);
 
             $role->delete();
 
@@ -441,7 +451,13 @@ final readonly class AccessControlService
             $permissions = $this->permissionModel()::whereIn('id', $permissionIds)->get();
 
             $before = $role->permissions()->pluck('name')->sort()->values()->all();
-            $this->assertMayGrantPermissions($actor, array_diff($permissions->pluck('name')->all(), $before));
+            $requested = $permissions->pluck('name')->all();
+
+            // Both ceilings read the pre-mutation state under the same lock: the grant ceiling bounds what the
+            // actor may add, the holder ceiling bounds whose tier the removals may shrink.
+            $this->assertMayGrantPermissions($actor, array_diff($requested, $before));
+            $this->assertRoleHoldersWithinTier($actor, $role, array_diff($before, $requested));
+
             $role->syncPermissions($permissions);
             $after = $role->permissions()->pluck('name')->sort()->values()->all();
 
@@ -505,33 +521,119 @@ final readonly class AccessControlService
      */
     public function effectiveHolderIds(PermissionContract $permission): array
     {
-        $tables = config('permission.table_names');
-        $userAlias = (new User)->getMorphClass();
+        $key = (int) $permission->getKey();
 
-        $roleIds = DB::table($tables['role_has_permissions'])
-            ->where('permission_id', $permission->getKey())
-            ->pluck('role_id');
+        return $this->holderSnapshot(new Collection([$permission]),
+            $this->access->superAdminRoleId())['holders'][$key] ?? [];
+    }
 
-        $superAdmin = $this->roleModel()::where('name', config('access.super_admin_role'))
-            ->where('guard_name', config('access.guard'))
-            ->first();
+    /**
+     * Effective holders and active-holder counts for a whole set of permissions, in four queries flat.
+     *
+     * The per-permission shape this replaces cost four queries each, and mutate() ran it twice (once to snapshot
+     * pre-mutation state, once to re-check after) - twenty queries for two lockout permissions, on every access
+     * mutation. Nothing about the answer changes; only the number of round trips does.
+     *
+     * Still read straight from the pivots rather than through the models, so mid-transaction state is visible
+     * and Spatie's permission cache cannot answer with a stale set.
+     *
+     * @param  Collection<int, PermissionContract>  $permissions
+     * @param  int|null  $superAdminRoleId  resolved by the caller so one mutation resolves it once, not per snapshot
+     * @return array{holders: array<int, list<int>>, active: array<int, int>}
+     */
+    private function holderSnapshot(Collection $permissions, ?int $superAdminRoleId): array
+    {
+        $permissionIds = $permissions->map(static fn(PermissionContract $p): int => (int) $p->getKey())->all();
 
-        if ($superAdmin) {
-            $roleIds->push($superAdmin->getKey());
+        if ($permissionIds === []) {
+            return ['holders' => [], 'active' => []];
         }
 
-        $viaRoles = DB::table($tables['model_has_roles'])
-            ->whereIn('role_id', $roleIds)
-            ->where('model_type', $userAlias)
-            ->pluck(config('permission.column_names.model_morph_key'));
+        $tables = config('permission.table_names');
+        $morphKey = config('permission.column_names.model_morph_key');
+        $userAlias = (new User)->getMorphClass();
 
-        $direct = DB::table($tables['model_has_permissions'])
-            ->where('permission_id', $permission->getKey())
-            ->where('model_type', $userAlias)
-            ->pluck(config('permission.column_names.model_morph_key'));
+        // Which roles carry which of the permissions, all at once.
+        $roleIdsByPermission = DB::table($tables['role_has_permissions'])
+            ->whereIn('permission_id', $permissionIds)
+            ->get(['permission_id', 'role_id'])
+            ->groupBy('permission_id')
+            ->map(static fn(Collection $rows): array => $rows->pluck('role_id')->map(static fn(mixed $id
+            ): int => (int) $id)->all())
+            ->all();
 
-        return $viaRoles->merge($direct)->unique()->map(static fn($id): int => (int) $id)->values()->all();
+        // Super admins hold everything, so their role joins every permission's role set.
+        $relevantRoleIds = collect($roleIdsByPermission)->flatten()->push($superAdminRoleId)
+            ->filter(static fn(?int $id): bool => $id !== null)
+            ->unique()->values()->all();
+
+        // Skipped entirely when no role grants any of them - the empty whereIn would round-trip as `where 0 = 1`.
+        $userIdsByRole = $relevantRoleIds === [] ? [] : DB::table($tables['model_has_roles'])
+            ->whereIn('role_id', $relevantRoleIds)
+            ->where('model_type', $userAlias)
+            ->get(['role_id', $morphKey])
+            ->groupBy('role_id')
+            ->map(static fn(Collection $rows): array => $rows->pluck($morphKey)->map(static fn(mixed $id
+            ): int => (int) $id)->all())
+            ->all();
+
+        $directByPermission = DB::table($tables['model_has_permissions'])
+            ->whereIn('permission_id', $permissionIds)
+            ->where('model_type', $userAlias)
+            ->get(['permission_id', $morphKey])
+            ->groupBy('permission_id')
+            ->map(static fn(Collection $rows): array => $rows->pluck($morphKey)->map(static fn(mixed $id
+            ): int => (int) $id)->all())
+            ->all();
+
+        $holders = [];
+
+        foreach ($permissionIds as $permissionId) {
+            $roleIds = $roleIdsByPermission[$permissionId] ?? [];
+
+            if ($superAdminRoleId !== null) {
+                $roleIds[] = $superAdminRoleId;
+            }
+
+            $ids = $directByPermission[$permissionId] ?? [];
+
+            foreach ($roleIds as $roleId) {
+                $ids = [...$ids, ...($userIdsByRole[$roleId] ?? [])];
+            }
+
+            $holders[$permissionId] = array_values(array_unique($ids));
+        }
+
+        return ['holders' => $holders, 'active' => $this->activeCounts($holders)];
     }
+
+    /**
+     * How many of each permission's holders can still act, counted with one query over the union of them all
+     * rather than one per permission.
+     *
+     * @param  array<int, list<int>>  $holders
+     * @return array<int, int>
+     */
+    private function activeCounts(array $holders): array
+    {
+        $everyHolder = array_values(array_unique(array_merge(...array_values($holders))));
+
+        $active = $everyHolder === [] ? [] : array_flip(
+            User::query()
+                ->whereIn('id', $everyHolder)
+                ->where('is_active', true)
+                ->whereNull('banned_at')
+                ->pluck('id')
+                ->map(static fn(mixed $id): int => (int) $id)
+                ->all()
+        );
+
+        return array_map(
+            static fn(array $ids): int => count(array_filter($ids, static fn(int $id): bool => isset($active[$id]))),
+            $holders,
+        );
+    }
+
 
     /**
      * Run a mutation under the shared lock and enforce the invariants before commit; throwing rolls the whole mutation back.
@@ -551,24 +653,29 @@ final readonly class AccessControlService
                 $this->assertTargetWithinTier($actor, $target);
             }
 
+            // Resolved once and threaded through both snapshots: it is the same row every time.
+            $superAdminRoleId = $this->access->superAdminRoleId();
+
+            $before = $this->holderSnapshot($permissions, $superAdminRoleId);
+
             $heldBefore = [];
             $activeBefore = [];
 
             foreach ($permissions as $permission) {
-                $holderIds = $this->effectiveHolderIds($permission);
+                $key = (int) $permission->getKey();
 
-                if (in_array((int) $actor->getKey(), $holderIds, true)) {
-                    $heldBefore[] = (int) $permission->getKey();
+                if (in_array((int) $actor->getKey(), $before['holders'][$key] ?? [], true)) {
+                    $heldBefore[] = $key;
                 }
 
-                if ($this->countActiveHolders($holderIds) > 0) {
-                    $activeBefore[] = (int) $permission->getKey();
+                if (($before['active'][$key] ?? 0) > 0) {
+                    $activeBefore[] = $key;
                 }
             }
 
             $result = $callback();
 
-            $this->assertStillManageable($actor, $permissions, $heldBefore, $activeBefore);
+            $this->assertStillManageable($actor, $permissions, $superAdminRoleId, $heldBefore, $activeBefore);
 
             return $result;
         });
@@ -596,43 +703,35 @@ final readonly class AccessControlService
 
     /**
      * @param  Collection<int, PermissionContract>  $permissions
+     * @param  int|null  $superAdminRoleId  resolved once by mutate() and reused, rather than looked up again here
      * @param  list<int>  $heldBefore  ids of the lockout permissions the actor held pre-mutation
      * @param  list<int>  $activeBefore  ids of the lockout permissions that had an active holder pre-mutation
      */
     private function assertStillManageable(
         User $actor,
         Collection $permissions,
+        ?int $superAdminRoleId,
         array $heldBefore,
         array $activeBefore
     ): void {
+        $after = $this->holderSnapshot($permissions, $superAdminRoleId);
+
         foreach ($permissions as $permission) {
             $key = (int) $permission->getKey();
-            $holderIds = $this->effectiveHolderIds($permission);
 
-            if (in_array($key, $heldBefore, true) && !in_array((int) $actor->getKey(), $holderIds, true)) {
+            if (in_array($key, $heldBefore, true)
+                && !in_array((int) $actor->getKey(), $after['holders'][$key] ?? [], true)) {
                 throw ValidationException::withMessages([
                     'access' => __('api.access.self_revocation'),
                 ]);
             }
 
-            if (in_array($key, $activeBefore, true) && $this->countActiveHolders($holderIds) === 0) {
+            if (in_array($key, $activeBefore, true) && ($after['active'][$key] ?? 0) === 0) {
                 throw ValidationException::withMessages([
                     'access' => __('api.access.last_manager'),
                 ]);
             }
         }
-    }
-
-    /**
-     * @param  list<int>  $holderIds
-     */
-    private function countActiveHolders(array $holderIds): int
-    {
-        return User::query()
-            ->whereIn('id', $holderIds)
-            ->where('is_active', true)
-            ->whereNull('banned_at')
-            ->count();
     }
 
     /**
@@ -642,20 +741,24 @@ final readonly class AccessControlService
      * target ceiling refuses everyone else acting on a super admin.
      * Their other roles stay editable from the top tier alone.
      *
-     * @param  list<int>  $roleIds
+     * Current membership is read from the caller's role-name snapshot rather than re-derived here: the caller took it
+     * inside the transaction under the lock, so this cannot answer from a relation loaded before either - and it
+     * spares a hasRole() lazy load per mutation.
+     *
+     * @param  list<int>  $roleIds  the submitted role ids
+     * @param  list<string>  $currentRoleNames  the target's roles as read inside the transaction ([] for a new account)
      */
-    private function assertSuperAdminMembershipUnchanged(User $target, array $roleIds): void
+    private function assertSuperAdminMembershipUnchanged(array $roleIds, array $currentRoleNames): void
     {
-        $superAdmin = $this->roleModel()::where('name', config('access.super_admin_role'))
-            ->where('guard_name', config('access.guard'))
-            ->first();
+        // The request-scoped memo, shared with the holder snapshots: the same row was being fetched twice per mutation.
+        $superAdminId = $this->access->superAdminRoleId();
 
-        if ($superAdmin === null) {
+        if ($superAdminId === null) {
             return;
         }
 
-        $requested = in_array((int) $superAdmin->getKey(), array_map('intval', $roleIds), true);
-        $current = $target->hasRole($superAdmin);
+        $requested = in_array($superAdminId, array_map('intval', $roleIds), true);
+        $current = in_array((string) config('access.super_admin_role'), $currentRoleNames, true);
 
         if ($requested !== $current) {
             throw ValidationException::withMessages([
@@ -686,13 +789,23 @@ final readonly class AccessControlService
      * The grant ceiling over roles: assigning a role grants everything it carries, so every
      * permission of every role being added must sit within the actor's ceiling.
      *
-     * @param  iterable<RoleContract>  $addedRoles
+     * The permissions are eager-loaded for the whole set in one query rather than walked role by role - the question
+     * is about their union, and a payload granting six roles was paying six lookups to answer it.
+     *
+     * @param  EloquentCollection<int, RoleContract>  $addedRoles
      */
-    private function assertMayGrantRoles(User $actor, iterable $addedRoles): void
+    private function assertMayGrantRoles(User $actor, EloquentCollection $addedRoles): void
     {
-        foreach ($addedRoles as $role) {
-            $this->assertMayGrantPermissions($actor, $role->permissions()->pluck('name')->all());
+        if ($addedRoles->isEmpty()) {
+            return;
         }
+
+        $addedRoles->load('permissions:id,name');
+
+        $this->assertMayGrantPermissions(
+            $actor,
+            $addedRoles->pluck('permissions')->flatten()->pluck('name')->unique()->all(),
+        );
     }
 
     /**
@@ -707,6 +820,83 @@ final readonly class AccessControlService
             throw ValidationException::withMessages([
                 'access' => __('api.access.target_above_tier'),
             ]);
+        }
+    }
+
+    /**
+     * The target ceiling over the role surface.
+     *
+     * A role's permissions are its holders' permissions, so removing one reaches every holder without naming any -
+     * the user-directed mutations pass a target and are checked in mutate(), a role edit has none to pass.
+     * Left unguarded, an actor refused by the ceiling on the user endpoints could demote the same account through
+     * the role it holds, and then reach the demoted account for real.
+     * Every holder the removal would demote must therefore sit within the actor's reach, exactly as if the actor
+     * had edited them one by one.
+     *
+     * Only privileged removals are guarded: they alone move a tier, and holding every role edit to the ceiling would
+     * make a role uneditable for everyone below its highest-tier holder - roles are global vocabulary.
+     * Super-admin holders are skipped: Gate::before answers for them, so what their roles carry changes nothing about
+     * their authority, while treating them as out of reach would privilege-lock every role they happen to hold.
+     *
+     * @param  iterable<string>  $removedNames  the permission names leaving the role
+     */
+    private function assertRoleHoldersWithinTier(User $actor, RoleContract $role, iterable $removedNames): void
+    {
+        $privileged = (array) config('access.privileged_permissions', []);
+        $demotes = false;
+
+        foreach ($removedNames as $name) {
+            if (in_array($name, $privileged, true)) {
+                $demotes = true;
+
+                break;
+            }
+        }
+
+        if (!$demotes) {
+            return;
+        }
+
+        // Super admins outrank nobody's reach - the ceiling never refuses them, so the scan can only cost queries.
+        if ($this->access->isSuperAdmin($actor)) {
+            return;
+        }
+
+        // Nothing privileged sits above this actor, so no holder can outrank them and the scan has one possible
+        // answer. The common case for a full administrator, and it costs zero queries to notice.
+        // Super-admin holders are the one way to outrank without a privileged grant, and they are skipped below.
+        if (array_diff($privileged, $this->access->permissionNames($actor)) === []) {
+            return;
+        }
+
+        // Read straight from the pivot: Role::users() resolves its related model from the request's default guard,
+        // which auth:sanctum rewrites to the provider-less runtime `sanctum` guard (see RoleController::userCounts()).
+        $holderIds = DB::table(config('permission.table_names.model_has_roles'))
+            ->where('role_id', $role->getKey())
+            ->where('model_type', (new User)->getMorphClass())
+            ->pluck(config('permission.column_names.model_morph_key'));
+
+        // Eager-loaded because the ceiling reads getAllPermissions() per holder, which would otherwise walk the
+        // role and permission relations one query at a time. Names and keys only: the ceiling compares permission
+        // names and role names, and nothing here needs a whole account.
+        $holders = User::query()
+            ->whereIn('id', $holderIds)
+            ->with(['roles:id,name', 'roles.permissions:id,name', 'permissions:id,name'])
+            ->get(['id']);
+
+        foreach ($holders as $holder) {
+            if ($this->access->isSuperAdmin($holder)) {
+                continue;
+            }
+
+            // Its own message rather than the user surface's target_above_tier: the actor is editing a role, not an
+            // account, and "managing this account" describes nothing they are looking at. The holder stays unnamed -
+            // by definition it is an account the actor is not allowed to reach.
+            if ($this->access->targetOutranksActor($actor, $holder)) {
+                throw ValidationException::withMessages([
+                    'access' => __('api.access.role_holder_above_tier'),
+                ]);
+            }
         }
     }
 

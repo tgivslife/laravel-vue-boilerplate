@@ -618,6 +618,82 @@ class AccessAdminApiTest extends AccessTestCase
         $this->assertFalse($holder->fresh()->hasRole('editors'));
     }
 
+    public function test_not_even_a_super_admin_can_change_super_admin_membership_through_the_api(): void
+    {
+        /*
+         * The case where the membership assertion is the only thing standing in the way: a super-admin actor
+         * passes the target ceiling (they outrank nobody), so if this check were skipped or raced, the
+         * break-glass tier would be editable from inside itself.
+         * Membership moves by seeder or console only - see assertSuperAdminMembershipUnchanged().
+         */
+        $roleModel = config('permission.models.role');
+        $superAdminRole = $roleModel::findOrCreate(config('access.super_admin_role'), config('access.guard'));
+        $editors = $roleModel::findOrCreate('editors', config('access.guard'));
+
+        $actor = $this->createUser();
+        $actor->assignRole($superAdminRole);
+        $this->actingAsStateful($actor);
+
+        $peer = $this->createUser();
+        $peer->assignRole($superAdminRole);
+
+        // Stripping it from a peer super admin.
+        $this->putJson("/api/access/users/{$peer->id}/roles", ['role_ids' => []])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.0.detail', __('api.access.super_admin_assignment'));
+
+        // Granting it to a regular account.
+        $outsider = $this->createUser();
+        $this->putJson("/api/access/users/{$outsider->id}/roles", ['role_ids' => [$superAdminRole->getKey()]])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.0.detail', __('api.access.super_admin_assignment'));
+
+        // And at creation, where the account has no roles to compare against.
+        $this->postJson('/api/access/users', [
+            'first_name' => 'Break', 'last_name' => 'Glass', 'email' => 'breakglass@example.com',
+            'role_ids' => [$superAdminRole->getKey()],
+        ])->assertStatus(422)
+            ->assertJsonPath('errors.0.detail', __('api.access.super_admin_assignment'));
+
+        // Membership kept as-is: a super admin may still reshape a peer's other roles.
+        $this->putJson("/api/access/users/{$peer->id}/roles", [
+            'role_ids' => [$superAdminRole->getKey(), $editors->getKey()],
+        ])->assertOk();
+
+        $fresh = $peer->fresh();
+        $this->assertTrue($fresh->hasRole($superAdminRole));
+        $this->assertTrue($fresh->hasRole('editors'));
+        $this->assertFalse($outsider->fresh()->hasRole($superAdminRole));
+        $this->assertNull(User::where('email', 'breakglass@example.com')->first());
+    }
+
+    public function test_a_regular_manager_is_refused_by_the_ceiling_before_the_membership_check(): void
+    {
+        // Ordering, now that the membership assertion runs inside the transaction after the tier check: an
+        // out-of-reach target answers with the ceiling's message on every user-directed mutation alike, rather
+        // than the role endpoint alone volunteering that the target is a super admin.
+        $this->actingAsManager();
+
+        $superAdminRole = config('permission.models.role')::findOrCreate(
+            config('access.super_admin_role'), config('access.guard')
+        );
+
+        $holder = $this->createUser();
+        $holder->assignRole($superAdminRole);
+
+        $this->putJson("/api/access/users/{$holder->id}/roles", ['role_ids' => []])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.0.detail', __('api.access.target_above_tier'));
+
+        // A regular target is within reach, so the membership assertion is what answers there.
+        $this->putJson("/api/access/users/{$this->createUser()->id}/roles",
+            ['role_ids' => [$superAdminRole->getKey()]])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.0.detail', __('api.access.super_admin_assignment'));
+
+        $this->assertTrue($holder->fresh()->hasRole($superAdminRole));
+    }
+
     public function test_unknown_role_ids_fail_validation(): void
     {
         $this->actingAsManager();
@@ -625,6 +701,47 @@ class AccessAdminApiTest extends AccessTestCase
 
         $this->putJson("/api/access/users/{$target->id}/roles", ['role_ids' => [999]])
             ->assertStatus(422);
+    }
+
+    public function test_integer_like_id_spellings_cannot_dodge_the_existence_check(): void
+    {
+        /*
+         * Ids must be native JSON integers: `integer:strict` refuses every other spelling as a shape error,
+         * and AllExistInGuard normalizes with FILTER_VALIDATE_INT so nothing can slip between the two rules -
+         * plain `integer` used to accept 42.0 and '+42', which the existence check then skipped unchecked.
+         */
+        $this->actingAsManager();
+        $target = $this->createUser();
+
+        $mine = config('permission.models.role')::findOrCreate('mine', config('access.guard'));
+        $foreign = config('permission.models.role')::create(['name' => 'foreign', 'guard_name' => 'other-guard']);
+
+        // String spellings of an id that EXISTS in-guard: refused on shape alone.
+        foreach ([(string) $mine->getKey(), '+'.$mine->getKey()] as $spelling) {
+            $this->putJson("/api/access/users/{$target->id}/roles", ['role_ids' => [$spelling]])
+                ->assertStatus(422);
+        }
+
+        // The float spelling of the same id, as a raw body: PHP's json_encode collapses 3.0 to 3, so putJson
+        // cannot put this shape on the wire - but a non-PHP client can, and json_decode yields float(3.0).
+        $this->call(
+            'PUT',
+            "/api/access/users/{$target->id}/roles",
+            server: ['CONTENT_TYPE' => 'application/json', 'HTTP_ACCEPT' => 'application/json'],
+            content: '{"role_ids": ['.$mine->getKey().'.0]}',
+        )->assertStatus(422);
+
+        // Ids that pass shape but exist nowhere in-guard: the existence check answers.
+        $this->putJson("/api/access/users/{$target->id}/roles", ['role_ids' => [999]])
+            ->assertStatus(422);
+        $this->putJson("/api/access/users/{$target->id}/roles", ['role_ids' => [$foreign->getKey()]])
+            ->assertStatus(422);
+
+        // The straight spelling of the in-guard id still lands.
+        $this->putJson("/api/access/users/{$target->id}/roles", ['role_ids' => [$mine->getKey()]])
+            ->assertOk();
+
+        $this->assertSame(['mine'], $target->fresh()->roles()->pluck('name')->all());
     }
 
     public function test_roles_are_listed_with_the_protected_flag(): void
@@ -814,6 +931,49 @@ class AccessAdminApiTest extends AccessTestCase
         // 'managers' (the acting admin's role) and 'editors' both grant users.view.
         $this->assertSame('users.view', $stats['most_granted']['name']);
         $this->assertSame(2, $stats['most_granted']['roles_count']);
+    }
+
+    public function test_a_role_outside_the_configured_guard_is_unreachable_on_every_endpoint(): void
+    {
+        // The browsers filter on guard_name, so a foreign-guard role is invisible in the list it would be
+        // reached from; the {role} binding has to agree, or the detail and mutation endpoints stay open to it.
+        $this->actingAsManager();
+
+        $mine = config('permission.models.role')::findOrCreate('mine', config('access.guard'));
+        $foreign = config('permission.models.role')::create(['name' => 'foreign', 'guard_name' => 'other-guard']);
+
+        $this->getJson("/api/access/roles/{$mine->getKey()}")->assertOk();
+
+        $this->getJson("/api/access/roles/{$foreign->getKey()}")->assertStatus(404);
+        $this->patchJson("/api/access/roles/{$foreign->getKey()}", ['name' => 'renamed'])->assertStatus(404);
+        $this->deleteJson("/api/access/roles/{$foreign->getKey()}")->assertStatus(404);
+        $this->putJson("/api/access/roles/{$foreign->getKey()}/permissions", ['permission_ids' => []])
+            ->assertStatus(404);
+
+        // Untouched by the refused mutations.
+        $this->assertSame('foreign', $foreign->fresh()->name);
+    }
+
+    public function test_a_non_numeric_role_id_is_a_404_not_a_database_error(): void
+    {
+        /*
+         * Without whereNumber('role') the segment reaches the binding's key comparison, which on postgres is a
+         * bigint: "invalid input syntax for type bigint", rendered as a 500.
+         *
+         * This test cannot demonstrate that, and says so rather than implying otherwise: the suite runs on sqlite,
+         * which is loosely typed and simply matches nothing, so these assertions pass with or without the
+         * constraint. It is here to pin the intended 404 contract and to fail if a `{role}` route is ever added
+         * without the constraint AND the suite is pointed at postgres.
+         */
+        $this->actingAsManager();
+
+        $this->getJson('/api/access/roles/abc')->assertStatus(404);
+        $this->patchJson('/api/access/roles/abc', ['name' => 'renamed'])->assertStatus(404);
+        $this->deleteJson('/api/access/roles/abc')->assertStatus(404);
+        $this->putJson('/api/access/roles/abc/permissions', ['permission_ids' => []])->assertStatus(404);
+
+        // The literal segment still wins over the wildcard.
+        $this->getJson('/api/access/roles/stats')->assertOk();
     }
 
     public function test_protectables_are_listed_from_the_whitelist(): void

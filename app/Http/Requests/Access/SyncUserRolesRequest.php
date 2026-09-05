@@ -2,11 +2,11 @@
 
 namespace App\Http\Requests\Access;
 
+use App\Rules\AllExistInGuard;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\Rule;
 
 final class SyncUserRolesRequest extends FormRequest
 {
@@ -28,12 +28,11 @@ final class SyncUserRolesRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'role_ids' => ['present', 'array'],
-            'role_ids.*' => [
-                'integer',
-                Rule::exists(config('permission.table_names.roles'), 'id')
-                    ->where('guard_name', config('access.guard')),
+            'role_ids' => [
+                'present', 'array',
+                new AllExistInGuard(config('permission.table_names.roles')),
             ],
+            'role_ids.*' => ['integer:strict'],
         ];
     }
 }

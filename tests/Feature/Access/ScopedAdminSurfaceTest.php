@@ -8,10 +8,9 @@ use Illuminate\Support\Arr;
 use Tests\Support\UserAllowlistDimension;
 
 /**
- * The record scope on the admin user surface: with a User-claiming dimension registered, every read
- * narrows to the actor's slice and every out-of-scope record answers exactly like one that does not
- * exist (docs/record-scoping.md). Stock deployments (no dimensions, no rules) are covered by the rest
- * of the suite passing unchanged - the scope must be invisible until a deployment opts in.
+ * The record scope on the admin user surface: with a User-claiming dimension registered, every read narrows to the
+ * actor's slice and every out-of-scope record answers exactly like one that does not exist (docs/record-scoping.md).
+ * Stock deployments (no dimensions, no rules) are covered by the rest of the suite passing unchanged - the scope must be invisible until a deployment opts in.
  */
 class ScopedAdminSurfaceTest extends AccessTestCase
 {
@@ -215,7 +214,8 @@ class ScopedAdminSurfaceTest extends AccessTestCase
         // Out of scope, authorization answers before validation: a 422 here would distinguish
         // an existing-but-out-of-reach id from a missing one.
         $this->putJson("/api/access/users/{$stranger->id}/roles", ['role_ids' => 'nonsense'])->assertStatus(404);
-        $this->putJson("/api/access/users/{$stranger->id}/permissions", ['permission_ids' => 'nonsense'])->assertStatus(404);
+        $this->putJson("/api/access/users/{$stranger->id}/permissions",
+            ['permission_ids' => 'nonsense'])->assertStatus(404);
         $this->patchJson("/api/access/users/{$stranger->id}", ['require_password_reset' => true])->assertStatus(404);
         $this->getJson("/api/access/users/{$stranger->id}/authentication-logs?date=not-a-date")->assertStatus(404);
 
@@ -240,6 +240,73 @@ class ScopedAdminSurfaceTest extends AccessTestCase
         // Out of scope: the tombstone is as invisible as a missing row.
         $this->getJson("/api/access/users/{$strangerGone->id}")->assertStatus(404);
         $this->getJson("/api/access/users/{$strangerGone->id}/audit-logs")->assertStatus(404);
+    }
+
+    public function test_the_audit_trail_withholds_the_identity_of_an_out_of_scope_actor(): void
+    {
+        // The trail's subject is scoped by the policy, but its actor is a second account - and the interesting case is
+        // precisely the one the scope exists for: an admin from another slice acting on a record both can see.
+        // The entry must still say an actor exists, without naming them.
+        $actor = $this->actingAsScopedManager();
+
+        $subject = $this->createUser();
+        $this->allow($actor, $subject);
+
+        $peer = $this->createUser(['email' => 'other-slice@example.com', 'first_name' => 'Otto']);
+        $peer->givePermissionTo('users.manage');
+
+        // Two mutations of the same in-scope account: one by the viewer, one by an admin they cannot reach.
+        app(AccessControlService::class)->updateUserAccount($actor, $subject, ['first_name' => 'Mine']);
+        app(AccessControlService::class)->updateUserAccount($peer, $subject, ['first_name' => 'Theirs']);
+
+        $entries = collect($this->getJson("/api/access/users/{$subject->id}/audit-logs")->assertOk()
+            ->json('data.entries'));
+
+        $this->assertCount(2, $entries);
+
+        [$withheld, $own] = [
+            $entries->firstWhere('actor.restricted', true), $entries->firstWhere('actor.id', $actor->id)
+        ];
+
+        // Reachable actor: named as before.
+        $this->assertNotNull($own);
+        $this->assertSame($actor->email, $own['actor']['email']);
+        $this->assertFalse($own['actor']['restricted']);
+
+        // Out-of-scope actor: the marker and nothing else - not the email, name or even the id.
+        $this->assertNotNull($withheld);
+        $this->assertSame(['restricted' => true], $withheld['actor']);
+
+        // Belt and braces: the identity is absent from the whole payload, not merely from the actor object.
+        $body = $this->getJson("/api/access/users/{$subject->id}/audit-logs")->assertOk()->content();
+        $this->assertStringNotContainsString('other-slice@example.com', $body);
+        $this->assertStringNotContainsString('Otto', $body);
+
+        // The action itself stays on the record - accountability survives the redaction.
+        $this->assertSame(['user.account_updated', 'user.account_updated'], $entries->pluck('action')->all());
+    }
+
+    public function test_a_super_admin_sees_every_audit_actor(): void
+    {
+        config(['access.dimensions' => [UserAllowlistDimension::class]]);
+
+        $role = config('permission.models.role')::findOrCreate(
+            config('access.super_admin_role'), config('access.guard')
+        );
+        $admin = $this->createUser();
+        $admin->assignRole($role);
+
+        $subject = $this->createUser();
+        $peer = $this->userWithPermissions('users.manage');
+
+        app(AccessControlService::class)->updateUserAccount($peer, $subject, ['first_name' => 'Changed']);
+
+        $this->actingAsStateful($admin);
+
+        $this->getJson("/api/access/users/{$subject->id}/audit-logs")
+            ->assertOk()
+            ->assertJsonPath('data.entries.0.actor.id', $peer->id)
+            ->assertJsonPath('data.entries.0.actor.restricted', false);
     }
 
     public function test_a_super_admin_keeps_full_reach_with_dimensions_active(): void

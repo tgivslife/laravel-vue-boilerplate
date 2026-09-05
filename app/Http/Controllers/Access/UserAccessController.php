@@ -13,7 +13,7 @@ use App\Http\Responses\JsonSuccessResponse;
 use App\Models\User;
 use App\Services\Access\AccessControlService;
 use App\Support\Access\EscapedLikeFilter;
-use Illuminate\Database\Eloquent\Builder;
+use DateTimeInterface;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Spatie\QueryBuilder\AllowedFilter;
@@ -67,23 +67,23 @@ class UserAccessController extends Controller
      */
     public function stats(Request $request): JsonResponse
     {
-        $scoped = static fn(): Builder => User::query()->visibleTo($request->user());
-
         $weekAgo = now()->subWeek();
         $twoWeeksAgo = now()->subWeeks(2);
 
-        $newThisWeek = $scoped()->where('created_at', '>=', $weekAgo)->count();
-        $newPreviousWeek = $scoped()->whereBetween('created_at', [$twoWeeksAgo, $weekAgo])->count();
+        $counts = $this->userCounts($request->user(), $weekAgo, $twoWeeksAgo);
+
+        $newThisWeek = $counts['new_this_week'];
+        $newPreviousWeek = $counts['new_previous_week'];
 
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: 'User statistics retrieved successfully',
             data: [
                 'stats' => [
-                    'total' => $scoped()->count(),
-                    'active' => $scoped()->where('is_active', true)->whereNull('banned_at')->count(),
-                    'unverified' => $scoped()->whereNull('email_verified_at')->count(),
-                    'deleted' => $scoped()->onlyTrashed()->count(),
+                    'total' => $counts['total'],
+                    'active' => $counts['active'],
+                    'unverified' => $counts['unverified'],
+                    'deleted' => $counts['deleted'],
                     'new_this_week' => $newThisWeek,
                     'new_this_week_delta' => $newPreviousWeek > 0
                         ? (int) round((($newThisWeek - $newPreviousWeek) / $newPreviousWeek) * 100)
@@ -91,6 +91,52 @@ class UserAccessController extends Controller
                 ]
             ],
         )->toResponse($request);
+    }
+
+    /**
+     * Every headline count in one pass, as conditional aggregates.
+     *
+     * Was a count() per metric - six scans of the same slice, and six copies of the scope-dimension subqueries in
+     * any deployment that registers them, since visibleTo() was re-applied each time.
+     *
+     * withTrashed() lifts the soft-delete scope so the tombstoned count can ride along; every live metric carries
+     * its own `deleted_at is null` in place of it.
+     * `sum(case ...)` rather than the tidier `count(*) filter (...)`: FILTER is postgres/sqlite only, and nothing
+     * else in the access layer hard-codes a dialect (see EscapedLikeFilter). `is_active` is used as a bare
+     * predicate for the same reason - a boolean column on postgres, 0/1 truthiness everywhere else.
+     *
+     * The two intake windows share their boundary, so an account created exactly at `$weekAgo` counts in both.
+     * Preserved from the per-metric version rather than quietly corrected - it only shifts a percentage by one row.
+     *
+     * @return array{total: int, active: int, unverified: int, deleted: int, new_this_week: int, new_previous_week: int}
+     */
+    private function userCounts(User $actor, DateTimeInterface $weekAgo, DateTimeInterface $twoWeeksAgo): array
+    {
+        $row = User::query()
+            ->visibleTo($actor)
+            ->withTrashed()
+            ->selectRaw('sum(case when deleted_at is null then 1 else 0 end) as total')
+            ->selectRaw('sum(case when deleted_at is null and is_active and banned_at is null then 1 else 0 end) as active')
+            ->selectRaw('sum(case when deleted_at is null and email_verified_at is null then 1 else 0 end) as unverified')
+            ->selectRaw('sum(case when deleted_at is not null then 1 else 0 end) as deleted')
+            ->selectRaw('sum(case when deleted_at is null and created_at >= ? then 1 else 0 end) as new_this_week',
+                [$weekAgo])
+            ->selectRaw(
+                'sum(case when deleted_at is null and created_at >= ? and created_at <= ? then 1 else 0 end) as new_previous_week',
+                [$twoWeeksAgo, $weekAgo]
+            )
+            ->first();
+
+        // An aggregate-only select always yields one row, but sum() over an empty slice is null, not zero -
+        // and a scope that narrowed to nothing (visibleTo's empty whereIn) is exactly that case.
+        return [
+            'total' => (int) ($row->total ?? 0),
+            'active' => (int) ($row->active ?? 0),
+            'unverified' => (int) ($row->unverified ?? 0),
+            'deleted' => (int) ($row->deleted ?? 0),
+            'new_this_week' => (int) ($row->new_this_week ?? 0),
+            'new_previous_week' => (int) ($row->new_previous_week ?? 0),
+        ];
     }
 
     /**

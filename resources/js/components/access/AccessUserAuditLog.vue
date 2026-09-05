@@ -92,6 +92,12 @@ function actionIcon (entry) {
 }
 
 function actorLabel (entry) {
+    /* An actor outside this admin's record scope: the server withholds the identity and sends only the
+     * marker, so there is no name to format. Distinct from a null actor, which is genuinely gone. */
+    if (entry.actor?.restricted) {
+        return t('messages.access.users.audit.actor_restricted')
+    }
+
     if (!entry.actor) {
         return t('messages.access.users.audit.actor_deleted')
     }
@@ -121,9 +127,9 @@ function changesOf (entry) {
     const before = entry.before ?? {}
     const after = entry.after ?? {}
 
-    return [...new Set([...Object.keys(before), ...Object.keys(after)])]
-        .filter(key => JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null))
-        .map(key => ({ key, from: before[key], to: after[key] }))
+    return [...new Set([...Object.keys(before), ...Object.keys(after)])].filter(
+        key => JSON.stringify(before[key] ?? null) !== JSON.stringify(after[key] ?? null)).
+        map(key => ({ key, from: before[key], to: after[key] }))
 }
 
 function isListChange (change) {

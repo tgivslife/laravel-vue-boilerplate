@@ -98,9 +98,8 @@ class FlushSessionsCommandTest extends TestCase
 
     public function test_refuses_to_flush_a_shared_redis_connection(): void
     {
-        // Repoint the queue at `default`, where a null session connection also
-        // resolves - FLUSHDB there would delete queued jobs. The guard exits
-        // before any redis call, so no server is needed.
+        // Repoint the queue at `default`, where a null session connection also resolves - FLUSHDB there would delete queued jobs.
+        // The guard exits before any redis call, so no server is needed.
         config([
             'session.driver' => 'redis',
             'session.connection' => null,
@@ -113,27 +112,36 @@ class FlushSessionsCommandTest extends TestCase
 
     public function test_flushes_a_dedicated_redis_connection_past_the_guard(): void
     {
-        // With a dedicated connection the guard passes; the flush itself
-        // needs a live redis server, so only the guard logic is asserted
-        // here by pointing the co-tenants elsewhere and expecting the
-        // command to proceed to (and fail at) the connection stage or
-        // succeed when redis is available.
+        $user = $this->createUser();
+        $this->createOtherSessionFor($user);
+
+        // With a dedicated connection the guard passes and the command reaches FLUSHDB.
+        //
+        // The connection is faked, like the cluster case below, and deliberately so: phpunit.xml pins the session
+        // and cache drivers to `array` but leaves REDIS_HOST alone, so `Redis::connection('sessions')` resolves to
+        // whatever the developer's .env points at. A real call here would FLUSHDB the machine's live session
+        // database and sign the developer out of their own dev environment - which is exactly what it used to do.
         config([
             'session.driver' => 'redis',
             'session.connection' => 'sessions',
         ]);
 
-        try {
-            $this->artisan('auth:flush-sessions', ['--force' => true]);
-        } catch (\Throwable) {
-            // No redis server in the test environment: reaching the
-            // connection attempt proves the guard let a dedicated
-            // connection through.
-            $this->assertTrue(true);
+        $connection = new class {
+            public bool $flushed = false;
 
-            return;
-        }
+            public function flushdb(): void
+            {
+                $this->flushed = true;
+            }
+        };
 
+        Redis::shouldReceive('connection')->with('sessions')->andReturn($connection);
+
+        $this->artisan('auth:flush-sessions', ['--force' => true])
+            ->expectsOutputToContain("Flushed the redis database behind the 'session.connection' connection.")
+            ->assertSuccessful();
+
+        $this->assertTrue($connection->flushed);
         $this->assertSame(0, DB::table('user_sessions')->count());
     }
 
@@ -166,9 +174,8 @@ class FlushSessionsCommandTest extends TestCase
         $user = $this->createUser();
         $this->createOtherSessionFor($user);
 
-        // A cluster connection carrying only the shared client prefix: a
-        // prefix sweep would be as indiscriminate as FLUSHDB, so the guard
-        // must refuse before any redis call.
+        // A cluster connection carrying only the shared client prefix: a prefix sweep would be as indiscriminate as FLUSHDB,
+        // so the guard must refuse before any redis call.
         config([
             'session.driver' => 'redis',
             'session.connection' => 'sessions',
@@ -199,9 +206,8 @@ class FlushSessionsCommandTest extends TestCase
             ],
         ]);
 
-        // A fake cluster client: one master whose scan yields a single
-        // prefixed key. The command must strip the prefix before deleting,
-        // because the client re-applies it (OPT_PREFIX).
+        // A fake cluster client: one master whose scan yields a single prefixed key.
+        // The command must strip the prefix before deleting, because the client re-applies it (OPT_PREFIX).
         $client = new class {
             /** @return list<array{0: string, 1: int}> */
             public function _masters(): array

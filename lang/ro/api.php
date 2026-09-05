@@ -276,6 +276,7 @@ return [
         'impersonation_target_ineligible' => 'Autentificarea în acest cont nu este posibilă.',
         'impersonation_above_tier' => 'Impersonarea unui administrator de acces necesită nivelul de super admin.',
         'target_above_tier' => 'Administrarea acestui cont necesită privilegii pe care contul le deține, iar tu nu.',
+        'role_holder_above_tier' => 'Acest rol este deținut de un cont aflat în afara razei tale de acțiune, așa că permisiunile privilegiate pe care le acordă nu pot fi retrase.',
         'grant_above_ceiling' => 'Poți acorda doar permisiuni pe care le deții tu însuți.',
         'impersonation_not_active' => 'Nicio impersonare nu este activă pe această sesiune.',
         'impersonation_blocked' => 'Această acțiune nu este disponibilă în timpul impersonării unui utilizator.',

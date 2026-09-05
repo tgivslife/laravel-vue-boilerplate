@@ -3,11 +3,11 @@
 namespace App\Http\Requests\Access;
 
 use App\Models\User;
+use App\Rules\AllExistInGuard;
 use Illuminate\Auth\Access\Response;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Validation\Rule;
 
 /**
  * Shared by the user direct-permission and role-permission sync endpoints.
@@ -33,12 +33,11 @@ final class SyncPermissionsRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'permission_ids' => ['present', 'array'],
-            'permission_ids.*' => [
-                'integer',
-                Rule::exists(config('permission.table_names.permissions'), 'id')
-                    ->where('guard_name', config('access.guard')),
+            'permission_ids' => [
+                'present', 'array',
+                new AllExistInGuard(config('permission.table_names.permissions')),
             ],
+            'permission_ids.*' => ['integer:strict'],
         ];
     }
 }

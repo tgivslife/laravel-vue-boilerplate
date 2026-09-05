@@ -14,6 +14,7 @@ use App\Models\User;
 use App\Services\Access\AccessControlService;
 use App\Services\Auth\SessionRegistry;
 use App\Support\Auth\AuthenticationLogPage;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -165,8 +166,16 @@ class UserAccountController extends Controller
     }
 
     /**
-     * The access audit trail with the target user as subject, newest first: every admin mutation of this
-     * account (profile facts, state changes, grant syncs) with its actor and scalar before/after snapshots.
+     * The access audit trail with the target user as subject, newest first: every admin mutation of this account
+     * (profile facts, state changes, grant syncs) with its actor and scalar before/after snapshots.
+     *
+     * The `view` above scopes the *subject*; the actor is a second account, and in a deployment with scope
+     * dimensions registered it may sit outside the viewer's reach entirely - a super admin, or an admin of
+     * another slice, acting on an account both can see.
+     * Its identity is therefore scoped in the eager load rather than filtered afterwards: an unreachable actor
+     * simply never loads, so no code path can forget to redact it. The entry still reports that an actor exists
+     * (AccessAuditLogResource marks it restricted), because "someone you cannot see did this" is accountability,
+     * while their address is not.
      */
     public function auditLogs(Request $request, User $user): JsonResponse
     {
@@ -175,7 +184,12 @@ class UserAccountController extends Controller
         $entries = AccessAuditLog::query()
             ->where('subject_type', $user->getMorphClass())
             ->where('subject_id', $user->getKey())
-            ->with('actor:id,first_name,last_name,email,deleted_at')
+            ->with([
+                'actor' => static function (BelongsTo $actor) use ($request): void {
+                    $actor->visibleTo($request->user())
+                        ->select(['id', 'first_name', 'last_name', 'email', 'deleted_at']);
+                }
+            ])
             ->orderByDesc('id')
             ->simplePaginate((int) config('access.audit_log.page_size', 15));
 

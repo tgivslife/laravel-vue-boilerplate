@@ -19,9 +19,8 @@ use Spatie\QueryBuilder\QueryBuilder;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Required-permission rules administration: the protectable whitelist (from
- * config/access.php), a record browser per protectable, and the class-level
- * and per-record rule groups.
+ * Required-permission rules administration: the protectable whitelist (from config/access.php), a record browser per protectable,
+ * and the class-level and per-record rule groups.
  */
 class ProtectableController extends Controller
 {
@@ -205,8 +204,7 @@ class ProtectableController extends Controller
     }
 
     /**
-     * The {type, mode, permissions[]} rule groups for a protectable class
-     * (null record id) or one record.
+     * The {type, mode, permissions[]} rule groups for a protectable class (null record id) or one record.
      */
     private function ruleGroups(string $alias, ?int $recordId): AnonymousResourceCollection
     {
