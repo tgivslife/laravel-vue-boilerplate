@@ -153,15 +153,16 @@ function removeAll () {
                         variant="subtle"
                         size="sm"
                     />
-                    <UButton
-                        v-else
-                        icon="i-tabler-plus"
-                        color="primary"
-                        variant="ghost"
-                        size="xs"
-                        :aria-label="`${t('messages.access.users.assign')} ${item.name}`"
-                        @click="add(item)"
-                    />
+                    <UTooltip v-else :text="`${t('messages.access.users.assign')} ${item.name}`">
+                        <UButton
+                            icon="i-tabler-plus"
+                            color="primary"
+                            variant="ghost"
+                            size="xs"
+                            :aria-label="`${t('messages.access.users.assign')} ${item.name}`"
+                            @click="add(item)"
+                        />
+                    </UTooltip>
                 </div>
                 <p v-if="availableItems.length === 0" class="text-sm text-muted py-2">
                     {{ t('messages.access.users.transfer_empty') }}
@@ -225,15 +226,16 @@ function removeAll () {
                         variant="subtle"
                         size="sm"
                     />
-                    <UButton
-                        v-else
-                        icon="i-tabler-x"
-                        color="error"
-                        variant="ghost"
-                        size="xs"
-                        :aria-label="`${t('messages.access.users.unassign')} ${item.name}`"
-                        @click="remove(item)"
-                    />
+                    <UTooltip v-else :text="`${t('messages.access.users.unassign')} ${item.name}`">
+                        <UButton
+                            icon="i-tabler-x"
+                            color="error"
+                            variant="ghost"
+                            size="xs"
+                            :aria-label="`${t('messages.access.users.unassign')} ${item.name}`"
+                            @click="remove(item)"
+                        />
+                    </UTooltip>
                 </div>
                 <p v-if="assignedItems.length === 0" class="text-sm text-muted py-2">
                     {{ t('messages.access.users.transfer_empty') }}

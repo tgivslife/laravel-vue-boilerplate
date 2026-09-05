@@ -39,12 +39,19 @@ const userMenuItems = useUserMenuItems(fullName)
             </template>
 
             <template #default="{ collapsed }">
+                <!-- Section headers read as quiet dividers, not entries; the chevron turns down as a
+                     group opens, so a closed one is legible without reading its icon. -->
                 <UNavigationMenu
                     :collapsed="collapsed"
                     :items="navigationItems"
                     orientation="vertical"
+                    trailing-icon="i-tabler-chevron-right"
                     tooltip
                     popover
+                    :ui="{
+                        label: 'text-dimmed font-normal mt-3',
+                        linkTrailingIcon: 'group-data-[state=open]:rotate-90',
+                    }"
                 />
             </template>
 
@@ -72,12 +79,9 @@ const userMenuItems = useUserMenuItems(fullName)
             </template>
         </UDashboardSidebar>
 
-        <!-- The dashboard group is a fixed, viewport-filling flex row, so the
-             banner lives inside the content column, pinned just below the
-             page's navbar: the navbar (--ui-header-height) and the banner
-             (h-12) both have theme-fixed heights, and the main.css
-             app-announcement rule makes the panel body yield the banner's
-             height so content never starts hidden beneath it. -->
+        <!-- The banner pins inside the content column just below the navbar; main.css's
+             app-announcement rule makes the panel body yield its height, so content never starts
+             hidden beneath it. -->
         <div class="app-content-column relative flex min-w-0 flex-1 flex-col">
             <AnnouncementBanner class="app-announcement absolute inset-x-0 top-(--ui-header-height)"/>
 

@@ -6,10 +6,12 @@ use App\Contracts\CaptchaVerifier;
 use App\Services\Auth\SiteVerifyCaptchaVerifier;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\ConnectionException;
+use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Testing\TestResponse;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -178,20 +180,27 @@ class CaptchaTest extends TestCase
     {
         // The default siteverify verifier has no secret configured: a deployment
         // that switched captcha on without finishing the job must hear about it.
-        // The 500's exception report is that loud failure; the spy keeps the
-        // expected entry out of laravel.log.
-        Log::spy();
+        // The 500's exception report is that loud failure; faking the handler keeps
+        // the expected entry out of laravel.log and lets the report be asserted.
+        Exceptions::fake();
         $this->enableCaptcha();
         config(['security.captcha.secret' => null]);
         $user = $this->createUser();
 
         $this->requestLink($user->email, ['captcha_token' => 'some-token'])->assertStatus(500);
+
+        // "Loudly" is the whole point of this test, and a 500 on its own does not prove the operator
+        // is told which half of the configuration is missing.
+        Exceptions::assertReported(static fn(RuntimeException $exception
+        ): bool => str_contains($exception->getMessage(), 'security.captcha.verify_url / security.captcha.secret'));
     }
 
     public function test_the_siteverify_verifier_speaks_the_shared_protocol(): void
     {
-        // The 503 in the response sequence logs the fail-closed error by design (the
-        // dedicated test below asserts that contract); the spy keeps it out of laravel.log.
+        // The 503 in the response sequence logs the fail-closed error by design (the dedicated test
+        // below asserts that contract); the spy keeps it out of laravel.log. Deliberately still a
+        // spy and not Exceptions::fake(): the verifier catches that failure and calls Log::error
+        // itself, so no exception is ever reported and faking the handler would suppress nothing.
         Log::spy();
 
         config([

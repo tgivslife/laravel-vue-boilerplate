@@ -7,16 +7,16 @@ const nuxtLocales = { en, ro }
 const { locale } = useI18n()
 const uiLocale = computed(() => nuxtLocales[locale.value] ?? en)
 
-/*
- * Keeps device locale and theme in sync with the account's server-persisted
- * preferences, whichever control changes them (settings page, user menu).
- */
+// Keeps device locale and theme in sync with the account's server-persisted preferences.
 usePreferencesSync()
+
+// Zero closes the 300ms skip window, which let a table's tooltips fire on their own after the first.
+const tooltipDefaults = { skipDelayDuration: 0 }
 </script>
 
 <template>
     <Suspense>
-        <UApp :locale="uiLocale">
+        <UApp :locale="uiLocale" :tooltip="tooltipDefaults">
             <RouterView/>
             <GlobalSpinner/>
         </UApp>

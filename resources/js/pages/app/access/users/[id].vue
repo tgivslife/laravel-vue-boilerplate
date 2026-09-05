@@ -448,13 +448,15 @@ async function saveAccess () {
             <UDashboardNavbar :title="user ? fullName(user) : t('messages.access.users.title')">
                 <template #leading>
                     <UDashboardSidebarCollapse/>
-                    <UButton
-                        icon="i-tabler-arrow-left"
-                        color="neutral"
-                        variant="ghost"
-                        to="/app/access/users"
-                        :aria-label="t('messages.access.users.back')"
-                    />
+                    <UTooltip :text="t('messages.access.users.back')">
+                        <UButton
+                            icon="i-tabler-arrow-left"
+                            color="neutral"
+                            variant="ghost"
+                            to="/app/access/users"
+                            :aria-label="t('messages.access.users.back')"
+                        />
+                    </UTooltip>
                 </template>
             </UDashboardNavbar>
         </template>
@@ -1120,15 +1122,21 @@ async function saveAccess () {
                                     readonly
                                     class="flex-1 font-mono"
                                 />
-                                <UButton
-                                    :icon="passwordCopied ? 'i-tabler-check' : 'i-tabler-copy'"
-                                    :color="passwordCopied ? 'success' : 'neutral'"
-                                    variant="outline"
-                                    :aria-label="passwordCopied
+                                <UTooltip
+                                    :text="passwordCopied
                                         ? t('messages.access.users.password_copied')
                                         : t('messages.access.users.copy_password')"
-                                    @click="copyTempPassword"
-                                />
+                                >
+                                    <UButton
+                                        :icon="passwordCopied ? 'i-tabler-check' : 'i-tabler-copy'"
+                                        :color="passwordCopied ? 'success' : 'neutral'"
+                                        variant="outline"
+                                        :aria-label="passwordCopied
+                                            ? t('messages.access.users.password_copied')
+                                            : t('messages.access.users.copy_password')"
+                                        @click="copyTempPassword"
+                                    />
+                                </UTooltip>
                             </div>
                         </UFormField>
 

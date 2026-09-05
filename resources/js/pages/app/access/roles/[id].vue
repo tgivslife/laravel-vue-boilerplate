@@ -212,13 +212,15 @@ async function savePermissions () {
             <UDashboardNavbar :title="role ? role.name : t('messages.access.roles.title')">
                 <template #leading>
                     <UDashboardSidebarCollapse/>
-                    <UButton
-                        icon="i-tabler-arrow-left"
-                        color="neutral"
-                        variant="ghost"
-                        to="/app/access/roles"
-                        :aria-label="t('messages.access.roles.back')"
-                    />
+                    <UTooltip :text="t('messages.access.roles.back')">
+                        <UButton
+                            icon="i-tabler-arrow-left"
+                            color="neutral"
+                            variant="ghost"
+                            to="/app/access/roles"
+                            :aria-label="t('messages.access.roles.back')"
+                        />
+                    </UTooltip>
                 </template>
             </UDashboardNavbar>
         </template>

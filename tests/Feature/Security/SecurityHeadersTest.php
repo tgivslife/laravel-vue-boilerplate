@@ -11,13 +11,11 @@ use Laravel\Telescope\Telescope;
 use Tests\TestCase;
 
 /**
- * SetSecurityHeaders: HSTS emission (secure requests only, preload prerequisites), the
- * Content-Security-Policy (base policy, nonce, report-only, captcha/dev-server/config-derived
- * sources) and the fill-if-absent baseline headers.
+ * SetSecurityHeaders: HSTS emission (secure requests only, preload prerequisites), the Content-Security-Policy
+ * (base policy, nonce, report-only, captcha/dev-server/config-derived sources) and the fill-if-absent baseline headers.
  *
- * The health endpoint stands in for "any response through the global stack"; the SPA-shell tests
- * point Vite at a fake hot file so app.blade.php renders without a build manifest - which also
- * exercises the dev-server source derivation.
+ * The health endpoint stands in for "any response through the global stack"; the SPA-shell tests point Vite at a
+ * fake hot file so app.blade.php renders without a build manifest - which also exercises the dev-server source derivation.
  */
 class SecurityHeadersTest extends TestCase
 {
@@ -122,6 +120,26 @@ class SecurityHeadersTest extends TestCase
             $this->assertMatchesRegularExpression('/script-src [^;]*http:\/\/localhost:5173/', $policy);
             $this->assertMatchesRegularExpression('/style-src [^;]*http:\/\/localhost:5173/', $policy);
             $this->assertMatchesRegularExpression('/connect-src [^;]*ws:\/\/localhost:5173/', $policy);
+            // A dependency's web worker is served from the dev origin rather than bundled into the app's
+            // own, so without this the browser blocks it and the feature dies in development only -
+            // the built deployment serves it from 'self' and never notices.
+            $this->assertMatchesRegularExpression('/worker-src [^;]*http:\/\/localhost:5173/', $policy);
+        } finally {
+            File::delete($hotFile);
+        }
+    }
+
+    public function test_worker_src_keeps_its_baseline_while_the_dev_server_extends_it(): void
+    {
+        $hotFile = $this->fakeViteHotFile('http://localhost:5173');
+
+        try {
+            $policy = (string) $this->get('https://localhost/up')->headers->get('Content-Security-Policy');
+
+            // The dev origin is an addition, never a replacement: 'self' and blob: still carry the
+            // app's own workers and the ones libraries mint at runtime.
+            $this->assertMatchesRegularExpression("/worker-src [^;]*'self'/", $policy);
+            $this->assertMatchesRegularExpression('/worker-src [^;]*blob:/', $policy);
         } finally {
             File::delete($hotFile);
         }

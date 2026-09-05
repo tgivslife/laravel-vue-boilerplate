@@ -378,25 +378,29 @@ async function deleteRole () {
 
             <template #actions-cell="{ row }">
                 <div class="flex items-center justify-end gap-1" @click.stop>
-                    <UButton
-                        icon="i-tabler-eye"
-                        color="neutral"
-                        variant="ghost"
-                        :aria-label="t('messages.access.roles.view')"
-                        @click="openDetail(row.original)"
-                    />
+                    <UTooltip :text="t('messages.access.roles.view')">
+                        <UButton
+                            icon="i-tabler-eye"
+                            color="neutral"
+                            variant="ghost"
+                            :aria-label="t('messages.access.roles.view')"
+                            @click="openDetail(row.original)"
+                        />
+                    </UTooltip>
                     <UDropdownMenu
                         v-if="can('roles.manage') && !row.original.protected"
                         :items="rowActions(row.original)"
                         :content="{ align: 'end' }"
                         :aria-label="t('messages.access.roles.actions')"
                     >
-                        <UButton
-                            icon="i-tabler-dots-vertical"
-                            color="neutral"
-                            variant="ghost"
-                            :aria-label="t('messages.access.roles.actions')"
-                        />
+                        <UTooltip :text="t('messages.access.roles.actions')">
+                            <UButton
+                                icon="i-tabler-dots-vertical"
+                                color="neutral"
+                                variant="ghost"
+                                :aria-label="t('messages.access.roles.actions')"
+                            />
+                        </UTooltip>
                     </UDropdownMenu>
                 </div>
             </template>

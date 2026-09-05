@@ -81,14 +81,16 @@ const locales = computed(() => availableLocales.map(l => ({
         </template>
 
         <template #right>
-            <UButton
-                to="https://github.com/nuxt/ui"
-                target="_blank"
-                icon="i-tabler-brand-github"
-                aria-label="GitHub"
-                color="neutral"
-                variant="ghost"
-            />
+            <UTooltip text="GitHub">
+                <UButton
+                    to="https://github.com/nuxt/ui"
+                    target="_blank"
+                    icon="i-tabler-brand-github"
+                    aria-label="GitHub"
+                    color="neutral"
+                    variant="ghost"
+                />
+            </UTooltip>
         </template>
     </UFooter>
 </template>

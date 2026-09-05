@@ -1,12 +1,12 @@
 import VueI18nPlugin from '@intlify/unplugin-vue-i18n/vite'
 import ui from '@nuxt/ui/vite'
-import vue from "@vitejs/plugin-vue";
-import laravel from "laravel-vite-plugin";
-import {fileURLToPath} from 'node:url'
-import {defineConfig} from 'vite'
-import MetaLayouts from "vite-plugin-vue-meta-layouts";
-import svgLoader from "vite-svg-loader";
-import {getPascalCaseRouteName, VueRouterAutoImports} from "vue-router/unplugin";
+import vue from '@vitejs/plugin-vue'
+import laravel from 'laravel-vite-plugin'
+import { fileURLToPath } from 'node:url'
+import { defineConfig } from 'vite'
+import MetaLayouts from 'vite-plugin-vue-meta-layouts'
+import svgLoader from 'vite-svg-loader'
+import { getPascalCaseRouteName, VueRouterAutoImports } from 'vue-router/unplugin'
 import VueRouter from 'vue-router/vite'
 import OkuMotionResolver from '@oku-ui/motion/resolver'
 import tablerIconSubset from './vite-tabler-icons.js'
@@ -164,7 +164,7 @@ export default defineConfig({
         }),
         svgLoader(),
     ],
-    define: {'process.env': {}},
+    define: { 'process.env': {} },
     resolve: {
         alias: {
             '@': fileURLToPath(new URL('./resources/js', import.meta.url)),

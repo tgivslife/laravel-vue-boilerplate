@@ -148,8 +148,7 @@ watch([search, roleFilter, statusFilter, twoFactorFilter, onboardingFilter, page
     }
 })
 
-/* URL -> state, for back/forward navigation. Only differing values are
- * assigned, so a write-back of our own replace() is a no-op. */
+/* URL -> state for back/forward. Only differing values are assigned, so a write-back of our own replace() is a no-op. */
 watch(() => route.query, (query) => {
     const state = stateFromQuery(query)
 
@@ -1136,25 +1135,29 @@ async function exportCsv () {
 
             <template #actions-cell="{ row }">
                 <div class="flex items-center justify-end gap-1" @click.stop>
-                    <UButton
-                        icon="i-tabler-eye"
-                        color="neutral"
-                        variant="ghost"
-                        :aria-label="t('messages.access.users.view')"
-                        @click="openDetail(row.original)"
-                    />
+                    <UTooltip :text="t('messages.access.users.view')">
+                        <UButton
+                            icon="i-tabler-eye"
+                            color="neutral"
+                            variant="ghost"
+                            :aria-label="t('messages.access.users.view')"
+                            @click="openDetail(row.original)"
+                        />
+                    </UTooltip>
                     <UDropdownMenu
                         v-if="hasRowActions(row.original)"
                         :items="rowActions(row.original)"
                         :content="{ align: 'end' }"
                         :aria-label="t('messages.access.users.actions')"
                     >
-                        <UButton
-                            icon="i-tabler-dots-vertical"
-                            color="neutral"
-                            variant="ghost"
-                            :aria-label="t('messages.access.users.actions')"
-                        />
+                        <UTooltip :text="t('messages.access.users.actions')">
+                            <UButton
+                                icon="i-tabler-dots-vertical"
+                                color="neutral"
+                                variant="ghost"
+                                :aria-label="t('messages.access.users.actions')"
+                            />
+                        </UTooltip>
                     </UDropdownMenu>
                 </div>
             </template>
@@ -1293,15 +1296,21 @@ async function exportCsv () {
                             readonly
                             class="flex-1 font-mono"
                         />
-                        <UButton
-                            :icon="passwordCopied ? 'i-tabler-check' : 'i-tabler-copy'"
-                            :color="passwordCopied ? 'success' : 'neutral'"
-                            variant="outline"
-                            :aria-label="passwordCopied
+                        <UTooltip
+                            :text="passwordCopied
                                 ? t('messages.access.users.password_copied')
                                 : t('messages.access.users.copy_password')"
-                            @click="copyTempPassword"
-                        />
+                        >
+                            <UButton
+                                :icon="passwordCopied ? 'i-tabler-check' : 'i-tabler-copy'"
+                                :color="passwordCopied ? 'success' : 'neutral'"
+                                variant="outline"
+                                :aria-label="passwordCopied
+                                    ? t('messages.access.users.password_copied')
+                                    : t('messages.access.users.copy_password')"
+                                @click="copyTempPassword"
+                            />
+                        </UTooltip>
                     </div>
                 </UFormField>
 

@@ -128,6 +128,14 @@ class SetSecurityHeaders
             'font-src' => ["'self'"],
             'connect-src' => ["'self'"],
             'frame-src' => [],
+            /*
+             * Stated explicitly because workers otherwise fall back to script-src, which is
+             * nonce-strict and has no blob: - and bundlers spawn workers from blob: URLs. Allowing
+             * blob: costs little, since minting one already requires running script. An array so
+             * the dev-server sources below can append the origin Vite serves library workers
+             * from - neither 'self' nor blob:.
+             */
+            'worker-src' => ["'self'", 'blob:'],
         ];
 
 
@@ -143,13 +151,6 @@ class SetSecurityHeaders
             "object-src 'none'",
             "frame-ancestors 'none'",
             "form-action 'self'",
-            /*
-             * Without an explicit worker-src, worker creation falls back to script-src, which has no blob:
-             * - and bundler-managed workers (Vite's dev client, libraries that inline theirs) are spawned from blob:
-             * URLs. blob: is low-risk here: minting a blob already requires running script, so it grants an attacker nothing new;
-             * the dangerous place for blob: is script-src, which stays nonce-strict.
-             */
-            "worker-src 'self' blob:",
         ];
 
         foreach ($sources as $directive => $values) {
@@ -259,6 +260,9 @@ class SetSecurityHeaders
             'img-src' => [$devUrl],
             'font-src' => [$devUrl],
             'connect-src' => [$devUrl, $devSocketUrl],
+            // Vite serves library workers from the dev origin - neither 'self' nor blob:.
+            // A built deployment serves them from 'self' and never needs this.
+            'worker-src' => [$devUrl],
         ];
     }
 
