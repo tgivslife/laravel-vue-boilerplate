@@ -1,7 +1,5 @@
-### --- Laravel Core --- ###
+### --- Laravel Core: framework artifacts, caches, logs --- ###
 /vendor
-/.phpunit.cache
-/.phpunit.result.cache
 /bootstrap/ssr
 /storage/*.key
 /storage/pail
@@ -12,38 +10,55 @@
 /storage/logs/*.log
 /public/storage
 /public/hot
-*.sqlite
+
+### --- Database Dumps: local SQLite and SQL dumps --- ###
+*.sqlite*
 *.sql
 
-### --- Frontend (Vue.js / Vite) --- ###
+### --- Frontend (Vue.js / Vite): packages, builds, generated declarations --- ###
 /node_modules
 /public/build
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-auto-imports.d.ts
-components.d.ts
-typed-router.d.ts
-.eslintrc-auto-import.json
+/auto-imports.d.ts
+/components.d.ts
+/typed-router.d.ts
+/.eslintrc-auto-import.json
+vite.config.*.timestamp-*
+*.tsbuildinfo
 
-### --- Environment & Secrets --- ###
-.env
-.env.backup
-.env.production
-.env.local
-.env.*.local
+### --- Environment & Secrets: machine config and credentials --- ###
+.env*
+!.env.example
 auth.json
+*.pem
+*.p12
+*.pfx
 
-### --- Testing & Tooling --- ###
+### --- Testing & Tooling: coverage output and tool caches --- ###
+/.phpunit.cache
+/.phpunit.result.cache
 .phpactor.json
 .php-cs-fixer.cache
 /pcov
 /clover.xml
 /coverage
 .pnpm-store
+/tests/Browser/screenshots
+/tests/Browser/console
 
-### --- AI CLI Tools --- ###
+### --- IDE Helpers: generated IDE autocomplete stubs --- ###
+/_ide_helper.php
+/_ide_helper_models.php
+/.phpstorm.meta.php
+
+### --- Docker: local compose overrides --- ###
+docker-compose.override.yml
+compose.override.yaml
+
+### --- AI CLI Tools: per-developer assistant config files --- ###
 .agents/
 .claude/
 .cursor/
@@ -52,16 +67,21 @@ auth.json
 .continue/
 .codeium/
 .gemini/
+.windsurf/
+.junie/
+.roo/
 CLAUDE.md
 AGENTS.md
 boost.json
 .mcp.json
 .mcp.json.tmp
 
-
-### --- OS & IDEs --- ###
+### --- OS & IDEs: system litter and editor settings --- ###
 .DS_Store
+._*
 Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 .idea/
 .vscode/
 .fleet/
@@ -69,5 +89,11 @@ Thumbs.db
 .zed/
 *.sublime-project
 *.sublime-workspace
-Homestead.json
-Homestead.yaml
+*.swp
+*~
+
+### --- Backup & Merge Artifacts: editor and patch leftovers --- ###
+*.bak
+*.orig
+*.rej
+
