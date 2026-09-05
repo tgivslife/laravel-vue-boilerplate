@@ -16,6 +16,9 @@ const props = defineProps({
      * Items above the admin's own grant ceiling: not addable, but - unlike lockedNames - still removable, mirroring the server's added-delta semantics.
      */
     ungrantableNames: { type: Array, default: () => [] },
+    /** Bulk actions: passing a label renders the matching header button ("assign all" left, "remove all" right). */
+    assignAllLabel: { type: String, default: null },
+    removeAllLabel: { type: String, default: null },
 })
 
 const selected = defineModel({ type: Array, default: () => [] })
@@ -33,11 +36,11 @@ function matches (item, term) {
     return item.name.toLowerCase().includes(term.trim().toLowerCase())
 }
 
-const availableItems = computed(() => props.items
-    .filter(item => !selected.value.includes(item.id) && matches(item, availableSearch.value)))
+const availableItems = computed(
+    () => props.items.filter(item => !selected.value.includes(item.id) && matches(item, availableSearch.value)))
 
-const assignedItems = computed(() => props.items
-    .filter(item => selected.value.includes(item.id) && matches(item, assignedSearch.value)))
+const assignedItems = computed(
+    () => props.items.filter(item => selected.value.includes(item.id) && matches(item, assignedSearch.value)))
 
 function pageOf (items, page) {
     return items.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -73,6 +76,25 @@ function isLocked (item) {
 function isUngrantable (item) {
     return props.ungrantableNames.includes(item.name)
 }
+
+/* Bulk moves operate on the full item set, not the current search filter: "all" means all.
+ * Locked items never move in either direction; ungrantable ones are never bulk-added but
+ * stay bulk-removable, mirroring the per-item buttons. */
+const bulkAssignableIds = computed(
+    () => props.items.filter(item => !isLocked(item) && !isUngrantable(item)).map(item => item.id))
+
+const hasBulkAssignable = computed(
+    () => bulkAssignableIds.value.some(id => !selected.value.includes(id)))
+
+const hasBulkRemovable = computed(() => props.items.some(item => selected.value.includes(item.id) && !isLocked(item)))
+
+function assignAll () {
+    selected.value = [...new Set([...selected.value, ...bulkAssignableIds.value])]
+}
+
+function removeAll () {
+    selected.value = props.items.filter(item => selected.value.includes(item.id) && isLocked(item)).map(item => item.id)
+}
 </script>
 
 <template>
@@ -80,7 +102,18 @@ function isUngrantable (item) {
         <div class="border border-default rounded-lg p-3 flex flex-col gap-3">
             <div class="flex items-center justify-between gap-2">
                 <span class="text-sm font-semibold text-highlighted">{{ availableLabel }}</span>
-                <UBadge :label="String(availableItems.length)" color="neutral" variant="outline" size="sm"/>
+                <div class="flex items-center gap-2">
+                    <UButton
+                        v-if="assignAllLabel"
+                        :label="assignAllLabel"
+                        color="primary"
+                        variant="ghost"
+                        size="xs"
+                        :disabled="!hasBulkAssignable"
+                        @click="assignAll"
+                    />
+                    <UBadge :label="String(availableItems.length)" color="neutral" variant="outline" size="sm"/>
+                </div>
             </div>
 
             <UInput
@@ -148,7 +181,18 @@ function isUngrantable (item) {
         <div class="border border-default rounded-lg p-3 flex flex-col gap-3">
             <div class="flex items-center justify-between gap-2">
                 <span class="text-sm font-semibold text-highlighted">{{ assignedLabel }}</span>
-                <UBadge :label="String(assignedItems.length)" color="primary" variant="subtle" size="sm"/>
+                <div class="flex items-center gap-2">
+                    <UButton
+                        v-if="removeAllLabel"
+                        :label="removeAllLabel"
+                        color="error"
+                        variant="ghost"
+                        size="xs"
+                        :disabled="!hasBulkRemovable"
+                        @click="removeAll"
+                    />
+                    <UBadge :label="String(assignedItems.length)" color="primary" variant="subtle" size="sm"/>
+                </div>
             </div>
 
             <UInput
