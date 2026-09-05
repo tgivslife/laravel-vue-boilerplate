@@ -12,8 +12,9 @@ use Throwable;
 /**
  * A phpredis connection that survives Sentinel failovers inside the failing command.
  *
- * Laravel's own PhpRedisConnection::command() rebuilds the client on failover-class errors but then RE-THROWS
- * the failing command - one visible failure per live connection per failover.
+ * Laravel's own PhpRedisConnection::command() rebuilds the client on failover-class errors from the address it
+ * already knows and retries only read-only commands, once; writes are re-thrown and nothing rediscovers the
+ * master - one visible failure per live connection per failover.
  * This subclass instead retries in a bounded loop owned by {@see SentinelRetryPolicy}: log, rebuild the client
  * through the connector closure with `refresh: true` (forced fresh sentinel discovery, see
  * PhpRedisSentinelConnector), wait, and re-run. When the promotion lands inside the budget, web requests and
@@ -57,10 +58,12 @@ class PhpRedisSentinelConnection extends PhpRedisConnection
     /**
      * {@inheritdoc}
      *
-     * Calls the grandparent rather than {@see PhpRedisConnection::command()} on purpose. The vendor's catch
-     * rebuilds the client from the *cached* address and re-throws, which on this driver means a second - and,
-     * when that address is dead, a third - connect inside every retry, all of it charged to our deadline. Its
-     * healing is not lost: RETRYABLE_ERROR_FRAGMENTS is a strict superset of the vendor's list.
+     * Calls the grandparent rather than {@see PhpRedisConnection::command()} on purpose. The vendor loop
+     * rebuilds the client from the *cached* address and re-runs read-only commands there (once, or
+     * `command_retries` times), which on this driver means a second - and, when that address is dead, a
+     * third - connect inside every retry, all of it charged to our deadline and none of it rediscovering the
+     * master. Its healing is not lost: RETRYABLE_ERROR_FRAGMENTS covers every fragment the vendor heals on,
+     * and the budget applies to writes too.
      */
     public function command($method, array $parameters = [])
     {

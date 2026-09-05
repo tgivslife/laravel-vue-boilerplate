@@ -152,5 +152,6 @@ swapped — Sentinel behavior, not a bug.
 | `REDIS_TIMEOUT` / `REDIS_READ_TIMEOUT` | `2.0` / `2.0` | Data-node socket timeouts (sentinel branch); never 0. Lifted for the duration of a `(p)subscribe`. |
 | `REDIS_PERSISTENT` | `false` | Prefer false with sentinel: pooled sockets can pin a demoted master until reuse fails. |
 | `REDIS_MAX_RETRIES`, `REDIS_BACKOFF_*` | `1` under sentinel (`3` otherwise), decorrelated jitter | phpredis same-socket retries — blips, not failover; the app budget owns failover. |
+| `REDIS_COMMAND_RETRIES` | `0` | Standalone only: how many times Laravel's `PhpRedisConnection::command()` re-runs a command after rebuilding the client (Laravel 13.26+). Read-only commands get one re-run regardless; a positive value extends it to writes. Sentinel bypasses that loop (the budget above owns failover) and cluster cannot carry the key on its node list. |
 | `REDIS_SESSIONS_PREFIX` | app-derived | Cluster only: the sessions key-prefix isolation. |
 | `REDIS_QUEUE` | topology-dependent | Queue name; carries the `{hash tag}` on cluster only. |

@@ -98,6 +98,21 @@ return [
             'prefix_indexes' => true,
             'search_path' => 'public',
             'sslmode' => env('DB_SSLMODE', 'prefer'),
+
+            /*
+             * libpq TCP keepalives, appended to the DSN only when set. Worth turning on behind a load balancer
+             * or NAT that drops idle connections: Horizon workers hold theirs open between jobs.
+             */
+            'keepalives' => env('DB_KEEPALIVES'),
+            'keepalives_idle' => env('DB_KEEPALIVES_IDLE'),
+            'keepalives_interval' => env('DB_KEEPALIVES_INTERVAL'),
+            'keepalives_count' => env('DB_KEEPALIVES_COUNT'),
+
+            /*
+             * Keep bound values out of QueryException messages (the SQL keeps its `?` placeholders), so a failed
+             * query never copies personal data into logs or error reports. Off with APP_DEBUG, where the values are what you are debugging.
+             */
+            'mask_bindings_in_exception_messages' => env('DB_MASK_BINDINGS_IN_EXCEPTIONS', !env('APP_DEBUG', false)),
         ],
 
         'sqlsrv' => [
@@ -181,6 +196,10 @@ return [
             'backoff_algorithm' => env('REDIS_BACKOFF_ALGORITHM', 'decorrelated_jitter'),
             'backoff_base' => env('REDIS_BACKOFF_BASE', 100),
             'backoff_cap' => env('REDIS_BACKOFF_CAP', 1000),
+
+            // Laravel's own re-runs after a rebuilt client, standalone only: reads already get one, this extends them to writes.
+            // Sentinel bypasses that loop (its budget is below); cluster cannot carry the key.
+            'command_retries' => env('REDIS_COMMAND_RETRIES', 0),
         ];
 
         $sentinel = static fn(array $base): array => array_merge($base, [
@@ -316,9 +335,7 @@ return [
                 ],
             ],
 
-            default => throw new RuntimeException(
-                "Unsupported REDIS_TOPOLOGY [{$topology}] - use standalone, sentinel, or cluster."
-            ),
+            default => throw new RuntimeException("Unsupported REDIS_TOPOLOGY [{$topology}] - use standalone, sentinel, or cluster."),
         };
     })(),
 

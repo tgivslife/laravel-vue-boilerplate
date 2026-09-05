@@ -7,6 +7,7 @@ use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Vite;
 use Laravel\Horizon\Horizon;
+use Laravel\Telescope\Telescope;
 use Tests\TestCase;
 
 /**
@@ -163,14 +164,15 @@ class SecurityHeadersTest extends TestCase
         $this->assertMatchesRegularExpression("/script-src 'self' 'nonce-[A-Za-z0-9]{40}' 'unsafe-eval'/", $policy);
     }
 
-    public function test_telescope_documents_fall_back_to_unsafe_inline_without_a_nonce(): void
+    public function test_telescope_documents_add_unsafe_eval_but_keep_the_nonce(): void
     {
         $policy = (string) $this->get('https://localhost/telescope/requests')
             ->headers->get('Content-Security-Policy');
 
-        // Telescope's inline bundle has no nonce hook; a nonce in the directive would void 'unsafe-inline'.
-        $this->assertStringContainsString("script-src 'self' 'unsafe-inline' 'unsafe-eval'", $policy);
-        $this->assertStringNotContainsString("'nonce-", $policy);
+        // Same shape as Horizon: Telescope inlines its bundle and takes the nonce via Telescope::cspNonce().
+        $this->assertSame(1, preg_match("/script-src 'self' 'nonce-([A-Za-z0-9]{40})' 'unsafe-eval'/", $policy, $matches));
+        $this->assertStringNotContainsString("'unsafe-inline' 'unsafe-eval'", $policy);
+        $this->assertSame(' nonce="'.$matches[1].'"', Telescope::$nonceAttribute);
     }
 
     public function test_the_strict_script_policy_has_no_eval_outside_the_dashboards(): void

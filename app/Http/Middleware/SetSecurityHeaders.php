@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Vite;
 use Illuminate\Support\Str;
 use Laravel\Horizon\Horizon;
+use Laravel\Telescope\Telescope;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
@@ -33,6 +34,7 @@ use Symfony\Component\HttpFoundation\Response;
  * The nonce is minted here (not by Vite::useCspNonce()'s own generator) so the header stays correct even when tests swap
  * the Vite instance for a fake.
  * `Vite::useCspNonce($nonce)` stamps it on all @vite-generated tags; the inline boot script in app.blade.php reads Vite::cspNonce().
+ * The ops dashboards inline their bundles and take the same nonce through Horizon::cspNonce() and Telescope::cspNonce().
  *
  * The flag-free baseline headers (X-Content-Type-Options, X-Frame-Options, Referrer-Policy) are filled only when absent,
  * so a more specific choice - EnsureJsonApiRequest's stricter `no-referrer` on API traffic - is preserved rather than clobbered by this outer layer.
@@ -55,9 +57,12 @@ class SetSecurityHeaders
             $nonce = Str::random(40);
 
             Vite::useCspNonce($nonce);
-            // Horizon inlines its entire dashboard bundle as an inline <script>;
-            // without the nonce the strict script-src blocks it and the dashboard renders empty.
+            // Both dashboards inline their whole bundle; without the nonce the strict script-src blanks them.
             Horizon::cspNonce($nonce);
+            // Telescope is require-dev and registered only locally (AppServiceProvider), so the class may be absent.
+            if (class_exists(Telescope::class)) {
+                Telescope::cspNonce($nonce);
+            }
         }
 
         $response = $next($request);
@@ -159,22 +164,16 @@ class SetSecurityHeaders
      * The script-src source list for the current request.
      *
      * The app's own documents get the strict pair ('self' + nonce).
-     * The bundled ops dashboards need more: both mount Vue against in-DOM templates, whose runtime compilation goes through
-     * new Function() and therefore requires 'unsafe-eval'.
-     *  - Horizon supports nonces (Horizon::cspNonce() above), so its documents add only 'unsafe-eval'.
-     *  - Telescope has no nonce hook for its inline bundle, so its documents fall back to 'unsafe-inline', and must
-     *    not carry the nonce, whose presence would void 'unsafe-inline'.
-     * Both dashboards are authorization-gated internal tools; the SPA policy stays strict.
+     * The Horizon and Telescope documents add 'unsafe-eval' only: both mount Vue against in-DOM templates,
+     * whose runtime compilation goes through new Function().
+     * Both are authorization-gated internal tools, and their inline bundles carry the nonce.
      *
      * @return list<string>
      */
     private function scriptSources(Request $request, string $nonce): array
     {
-        if ($this->matchesPath($request, (string) config('telescope.path', 'telescope'))) {
-            return ["'self'", "'unsafe-inline'", "'unsafe-eval'"];
-        }
-
-        if ($this->matchesPath($request, (string) config('horizon.path', 'horizon'))) {
+        if ($this->matchesPath($request, (string) config('horizon.path', 'horizon'))
+            || $this->matchesPath($request, (string) config('telescope.path', 'telescope'))) {
             return ["'self'", "'nonce-{$nonce}'", "'unsafe-eval'"];
         }
 

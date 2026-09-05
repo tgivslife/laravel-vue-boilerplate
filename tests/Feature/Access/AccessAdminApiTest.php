@@ -914,6 +914,10 @@ class AccessAdminApiTest extends AccessTestCase
 
     public function test_the_permission_stats_summarize_vocabulary_coverage(): void
     {
+        // Measured rather than hard-coded: the vocabulary comes from config('access.resources') and grows with
+        // every new capability, and this test is about the arithmetic, not the size of the dictionary.
+        $seeded = config('permission.models.permission')::where('guard_name', config('access.guard'))->count();
+
         $this->actingAsManager();
 
         $editors = config('permission.models.role')::findOrCreate('editors', config('access.guard'));
@@ -924,10 +928,11 @@ class AccessAdminApiTest extends AccessTestCase
 
         $stats = $this->getJson('/api/access/permissions/stats')->assertOk()->json('data.stats');
 
-        // The seeded vocabulary (users view/manage/impersonate, roles view/manage, settings.manage) plus widgets.special.
-        $this->assertSame(7, $stats['total']);
-        // No role grants widgets.special (held directly), users.impersonate or settings.manage.
-        $this->assertSame(3, $stats['unassigned']);
+        // The seeded vocabulary plus widgets.special.
+        $this->assertSame($seeded + 1, $stats['total']);
+        // Only the four permissions 'managers' grants are assigned ('editors' repeats one of them);
+        // everything else, widgets.special included, is unassigned.
+        $this->assertSame($seeded + 1 - 4, $stats['unassigned']);
         $this->assertSame(1, $stats['direct_grants']);
         // 'managers' (the acting admin's role) and 'editors' both grant users.view.
         $this->assertSame('users.view', $stats['most_granted']['name']);

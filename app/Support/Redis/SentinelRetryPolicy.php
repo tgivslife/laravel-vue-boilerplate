@@ -29,10 +29,12 @@ class SentinelRetryPolicy
     /**
      * Exception-message fragments treated as "the master is gone, rediscover and retry".
      *
-     * Matched case-insensitively, and deliberately a strict superset of the framework's own list in
-     * PhpRedisConnection::command() (`went away`, `socket`, `Error while reading`, `read error on connection`,
-     * `READONLY`, `Connection lost`) - the connection bypasses that vendor handling, so anything it used to
-     * heal has to be healed here instead. Adapted from namoshek/laravel-redis-sentinel (MIT).
+     * Matched case-insensitively. Covers every fragment the framework's own PhpRedisConnection::command()
+     * heals on (`went away`, `socket`, `Error while reading`, `read error on connection`, `READONLY`,
+     * `Connection lost`) - the connection bypasses that vendor loop, so anything it would heal has to be
+     * healed here instead. The vendor's cluster-only fragment (`Error processing response from Redis node`)
+     * is left out: phpredis emits it from RedisCluster, never from a sentinel master/replica pair.
+     * Adapted from namoshek/laravel-redis-sentinel (MIT).
      *
      * `NOREPLICAS` is deliberately absent. A master refusing writes for want of a good replica is not a
      * transient promotion artifact: after a failover the new master has no replica at all until the demoted
