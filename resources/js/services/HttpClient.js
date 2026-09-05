@@ -29,6 +29,14 @@ export default class HttpClient {
 
         try {
             const { data } = await executor()
+
+            // Newer list endpoints carry pagination in a sibling `meta` block
+            // (JsonSuccessResponse); grafting it onto the unwrapped payload keeps
+            // the historical `data`-only contract for every response without one.
+            if (data?.meta !== undefined && data?.data !== undefined && !Array.isArray(data.data)) {
+                return { ...data.data, meta: data.meta }
+            }
+
             return data?.data ?? data
         } catch (error) {
             throw ProblemDetailsError.fromAxiosError(error)
