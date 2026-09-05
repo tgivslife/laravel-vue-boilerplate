@@ -16,7 +16,8 @@ function recursiveLayouts (route) {
 }
 
 const router = createRouter({
-    history: createWebHistory(import.meta.env.BASE_URL),
+    // Not import.meta.env.BASE_URL: that is Vite's asset base ('/build/' once built), while the SPA is always served from the domain root.
+    history: createWebHistory('/'),
     scrollBehavior (to) {
         if (to.hash) {
             return { el: to.hash, behavior: 'smooth', top: 60 }
