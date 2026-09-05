@@ -65,7 +65,7 @@ class SentinelClientFactoryTest extends TestCase
     public function test_it_refuses_an_unclosed_ipv6_bracket(): void
     {
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('closing bracket');
+        $this->expectExceptionMessageIsOrContains('closing bracket');
 
         $this->factory->parseHosts('[fd00::1');
     }
@@ -90,7 +90,7 @@ class SentinelClientFactoryTest extends TestCase
         // A username alone authenticates nothing; contacting the sentinels anonymously instead would only
         // surface the day an ACL starts being enforced.
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('REDIS_SENTINEL_USERNAME is set without REDIS_SENTINEL_PASSWORD');
+        $this->expectExceptionMessageIsOrContains('REDIS_SENTINEL_USERNAME is set without REDIS_SENTINEL_PASSWORD');
 
         $this->factory->options('s1', 26379, ['sentinel_username' => 'ops']);
     }

@@ -64,7 +64,7 @@ class EnvironmentSecurityChecksTest extends TestCase
         config(['security.force_https' => false]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('SECURITY_FORCE_HTTPS must be enabled.');
+        $this->expectExceptionMessageIsOrContains('SECURITY_FORCE_HTTPS must be enabled.');
 
         EnvironmentSecurityChecks::assertForEnvironment('production');
     }
@@ -75,7 +75,7 @@ class EnvironmentSecurityChecksTest extends TestCase
         config(['app.url' => 'http://acme.example']);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('APP_URL must use https://.');
+        $this->expectExceptionMessageIsOrContains('APP_URL must use https://.');
 
         EnvironmentSecurityChecks::assertForEnvironment('production');
     }
@@ -86,7 +86,7 @@ class EnvironmentSecurityChecksTest extends TestCase
         config(['cors.allowed_origins' => ['*']]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('CORS allowed origins must not use wildcard "*".');
+        $this->expectExceptionMessageIsOrContains('CORS allowed origins must not use wildcard "*".');
 
         EnvironmentSecurityChecks::assertForEnvironment('production');
     }
@@ -97,7 +97,7 @@ class EnvironmentSecurityChecksTest extends TestCase
         config(['security.trusted_hosts' => []]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('TRUSTED_HOSTS must be configured.');
+        $this->expectExceptionMessageIsOrContains('TRUSTED_HOSTS must be configured.');
 
         EnvironmentSecurityChecks::assertForEnvironment('production');
     }
@@ -109,7 +109,7 @@ class EnvironmentSecurityChecksTest extends TestCase
         config(['security.trusted_proxies' => '*']);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('TRUSTED_PROXIES must not use wildcard "*".');
+        $this->expectExceptionMessageIsOrContains('TRUSTED_PROXIES must not use wildcard "*".');
 
         EnvironmentSecurityChecks::assertForEnvironment('production');
     }
@@ -140,7 +140,7 @@ class EnvironmentSecurityChecksTest extends TestCase
         config(['session.secure' => false]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('SESSION_SECURE_COOKIE must be true.');
+        $this->expectExceptionMessageIsOrContains('SESSION_SECURE_COOKIE must be true.');
 
         EnvironmentSecurityChecks::assertForEnvironment('production');
     }
@@ -151,7 +151,7 @@ class EnvironmentSecurityChecksTest extends TestCase
         config(['security.csp.enabled' => false]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('SECURITY_CSP_ENABLED must be enabled');
+        $this->expectExceptionMessageIsOrContains('SECURITY_CSP_ENABLED must be enabled');
 
         EnvironmentSecurityChecks::assertForEnvironment('production');
     }

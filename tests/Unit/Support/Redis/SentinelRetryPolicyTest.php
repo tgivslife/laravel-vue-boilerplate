@@ -174,7 +174,7 @@ class SentinelRetryPolicyTest extends TestCase
     public function test_non_redis_failures_propagate_untouched(): void
     {
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('not a redis problem');
+        $this->expectExceptionMessageIsOrContains('not a redis problem');
 
         $this->policy()->run(
             static fn() => throw new RuntimeException('not a redis problem'),

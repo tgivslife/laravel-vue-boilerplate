@@ -175,7 +175,7 @@ class PhpRedisSentinelConnectorTest extends TestCase
         $connector = $this->connectorWithSentinels([]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('REDIS_SENTINEL_HOSTS');
+        $this->expectExceptionMessageIsOrContains('REDIS_SENTINEL_HOSTS');
 
         $connector->exposeResolveMaster($this->sentinelConfig(''));
     }
@@ -393,7 +393,7 @@ class PhpRedisSentinelConnectorTest extends TestCase
         $connector = $this->connectorWithSentinels([]);
 
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('REDIS_TOPOLOGY=cluster');
+        $this->expectExceptionMessageIsOrContains('REDIS_TOPOLOGY=cluster');
 
         $connector->connectToCluster([], [], []);
     }

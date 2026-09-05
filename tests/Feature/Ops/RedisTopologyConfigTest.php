@@ -223,7 +223,7 @@ class RedisTopologyConfigTest extends TestCase
     public function test_an_unknown_topology_fails_loudly(): void
     {
         $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('Unsupported REDIS_TOPOLOGY [bogus]');
+        $this->expectExceptionMessageIsOrContains('Unsupported REDIS_TOPOLOGY [bogus]');
 
         $this->loadConfig('database', ['REDIS_TOPOLOGY' => 'bogus']);
     }
