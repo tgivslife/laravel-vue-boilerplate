@@ -153,8 +153,11 @@ Findings are mirrored to the log channel. Exits non-zero on failures;
 Every sensitive endpoint sits behind a named limiter (`RateLimitServiceProvider`). Mail-sending endpoints throttle every
 request, not just failures — sending email is the cost, so volume itself is the abuse vector — counted per target
 address *and* per caller IP. Token-guarded endpoints throttle per IP and per hashed token; password-confirmed endpoints
-share one per-user bucket so a hijacked session cannot become a password-guessing oracle. The individual knobs live with
-their features.
+share one per-user bucket so a hijacked session cannot become a password-guessing oracle. The credential doors (login and
+the two-factor challenge) carry two complementary limits: the per-credential failure lockout (email+IP, counts failures)
+and a per-IP volume ceiling (`throttle:login`, counts every request) — the latter bounds password spraying, which fans
+out across many emails so no single email's failure bucket ever trips the lockout. The individual knobs live with their
+features.
 
 ## Captcha hook
 

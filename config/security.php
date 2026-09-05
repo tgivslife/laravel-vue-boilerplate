@@ -155,6 +155,26 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Login Request Limit (per IP)
+    |--------------------------------------------------------------------------
+    |
+    | An IP-volume ceiling on the credential doors (login + two-factor challenge), complementing the per-credential lockout above.
+    | The lockout counts failures per email+IP, so it never trips under password spraying - one password
+    | across many emails leaves each bucket at 1; this limit counts every request per IP, bounding spray volume however it fans out.
+    | Counting all requests (not just failures) on purpose: a failure-only bucket clears on any success.
+    | Feeds the `login` named limiter; keep it well above a human's rate so shared egress IPs (offices, CGNAT) are safe.
+    |
+    */
+
+    'login' => [
+        'request_limit' => [
+            'max_attempts' => env('LOGIN_REQUEST_MAX_ATTEMPTS', 20),
+            'decay_minutes' => env('LOGIN_REQUEST_DECAY_MINUTES', 1),
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Password (Credentials) Login
     |--------------------------------------------------------------------------
     |
@@ -216,23 +236,13 @@ return [
     | Admin Invitations
     |--------------------------------------------------------------------------
     |
-    | First-sign-in links for admin-created accounts: instead of a temporary password read out of band,
-    | user creation can mail a single-use link (the `invitation` delivery mode on POST /api/access/users).
-    | Invitations ride the magic-link machinery (same hashed tokens, atomic claim, purge command) as a
-    | second token purpose, but answer to this switch - not `magic_link.enabled` - so a password-only
-    | deployment that keeps the self-serve door closed can still invite.
-    |
-    | Invited accounts start passwordless. When password login is the only enabled door, creation also
-    | flags `require_password_reset`, so the consumed link lands the user in front of the choose-your-password
-    | gate (EnsurePasswordResetNotRequired) before the app opens up.
-    |
-    | `two_factor_required` stamps the per-user enrollment mandate on invited accounts at creation,
-    | mirroring `magic_link.provision_two_factor_required`. Off by default: unlike the public
-    | self-provisioning door, invited accounts are admin-vetted.
-    |
-    | Resending (POST /api/access/users/{user}/resend-invitation) revokes the previous link: unlike the
-    | self-serve door, both sides of the exchange are known, so there is no slow-mail reason to keep old
-    | links alive.
+    | First-sign-in links for admin-created accounts (the `invitation` delivery mode on POST /api/access/users),
+    | riding the magic-link machinery but gated by this switch - not `magic_link.enabled` - so a password-only
+    | deployment with the self-serve door closed can still invite.
+    | Invited accounts start passwordless; when password login is the only door, creation also flags `require_password_reset`
+    | so the consumed link lands on the choose-your-password gate.
+    | `two_factor_required` stamps the per-user enrollment mandate at creation (off by default: invited accounts are admin-vetted).
+    | Resending revokes the previous link - both sides are known, so there is no slow-mail reason to keep old ones alive.
     |
     */
 

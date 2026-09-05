@@ -30,9 +30,11 @@ use App\Http\Middleware\RequireCaptcha;
 use Illuminate\Support\Facades\Route;
 
 Route::post('login', [AuthController::class, 'login'])
-    ->middleware(RequireCaptcha::class.':login')
+    ->middleware(['throttle:login', RequireCaptcha::class.':login'])
     ->name('login');
-Route::post('two-factor/challenge', [TwoFactorChallengeController::class, 'challenge'])->name('two-factor.challenge');
+Route::post('two-factor/challenge', [TwoFactorChallengeController::class, 'challenge'])
+    ->middleware('throttle:login')
+    ->name('two-factor.challenge');
 Route::get('auth/methods', [IdentityProviderController::class, 'methods'])->name('auth.methods');
 Route::get('settings', [AppSettingController::class, 'publicIndex'])->name('settings.public');
 

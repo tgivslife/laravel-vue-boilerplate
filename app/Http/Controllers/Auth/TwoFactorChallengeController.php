@@ -12,8 +12,8 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Completes a two-factor login parked by TwoFactorChallengeService.
  *
- * Deliberately not throttled by route middleware: the pending challenge only exists behind verified credentials,
- * and failed codes feed the same lockout as failed passwords - mirroring how POST /api/login is guarded.
+ * Failed codes feed the same per-credential email+IP lockout as failed passwords, and the route shares login's
+ * per-IP volume limiter (throttle:login) - mirroring how POST /api/login is guarded on both dimensions.
  */
 class TwoFactorChallengeController extends Controller
 {

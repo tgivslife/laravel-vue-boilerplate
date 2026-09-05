@@ -27,6 +27,17 @@ class RateLimitServiceProvider extends ServiceProvider
         });
 
         /*
+         * IP-volume ceiling on the credential doors, complementing the per-credential failure lockout (LoginRateLimiter):
+         * counts every request, so password spraying across many emails can't slip under the per-email bucket.
+         */
+        RateLimiter::for('login', static function (Request $request) {
+            $max = (int) config('security.login.request_limit.max_attempts', 20);
+            $decay = (int) config('security.login.request_limit.decay_minutes', 1);
+
+            return Limit::perMinutes($decay, $max)->by('login:ip:'.$request->ip());
+        });
+
+        /*
          * Counts every request, not just failures: sending email is the cost, so volume itself is the abuse vector.
          */
         RateLimiter::for('magic-link-request', static function (Request $request) {
