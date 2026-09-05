@@ -12,6 +12,9 @@ use Illuminate\Http\Resources\Json\JsonResource;
  * Every row carries the requesting admin's reach verdicts - `manageable` (the target ceiling) and `impersonable`
  * (the strict impersonation tier) - so both the list's row actions and the detail page render out-of-reach
  * accounts read-only instead of surfacing the server's 422s.
+ * The verdicts compose the tier ceilings only, on purpose: visibleTo() already filters the index, so a record-scope
+ * vetoed row never reaches the client and the verdicts are never asked about one - a per-row allowsRecord() call
+ * here would be pure cost.
  * The detailed form adds the effective permission set (direct + via roles) the editor renders as disabled checks.
  */
 final class AccessUserResource extends JsonResource

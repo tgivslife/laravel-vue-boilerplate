@@ -101,6 +101,10 @@ return [
     | The map doubles as the whitelist the admin API validates against and is merged into the enforced morph map.
     | `label` names the column the record browser displays and searches.
     |
+    | User is intentionally absent: this whitelist drives the rules administration UI, and exposing per-user
+    | record rules to roles.manage holders is a separate decision with its own escalation surface.
+    | The record scope on the admin user surface (visibleTo()/UserPolicy) works regardless of this list.
+    |
     */
 
     'protectables' => [
@@ -113,10 +117,10 @@ return [
     |--------------------------------------------------------------------------
     |
     | App-registered implementations of Contracts\ScopeDimension, resolved from the container.
-    | Each dimension both narrows visibleTo() queries and vetoes single-record access - on endpoints that ask.
-    | Only opted-in surfaces consult the scope: app endpoints that call visibleTo()/userCan(), and impersonation.
-    | The shipped admin user surface (browse/export/edit/delete under /api/access) is capability-gated only;
-    | A deployment that scopes User must wire a UserPolicy on top of Policies\ResourcePolicy and authorize per record there.
+    | Each dimension both narrows visibleTo() queries and vetoes single-record access on every surface that asks.
+    | The shipped admin user surface asks: it is scoped end to end through Policies\UserPolicy and visibleTo()
+    | (browse, export, stats, membership, per-record reads and mutations, impersonation).
+    | Creation (POST /api/access/users) is deliberately not scoped, dimensions do not constrain creation into a slice.
     | See docs/record-scoping.md.
     | A project with none gets plain RBAC plus required-permission rules.
     |

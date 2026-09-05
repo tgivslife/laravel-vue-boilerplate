@@ -2,17 +2,21 @@
 
 namespace App\Http\Requests\Access;
 
+use Illuminate\Auth\Access\Response;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Gate;
 
 final class UserAccountUpdateRequest extends FormRequest
 {
     /**
-     * Authorization is enforced by the route middleware (the configured admin capability).
+     * The capability is enforced by the route middleware, but the record-scope verdict (UserPolicy) must
+     * answer here, before validation: an unknown id 404s at binding, so an out-of-scope target must 404
+     * too - not leak a 422 when the payload happens to be invalid.
      */
-    public function authorize(): bool
+    public function authorize(): Response
     {
-        return true;
+        return Gate::inspect('update', $this->route('user'));
     }
 
     /**

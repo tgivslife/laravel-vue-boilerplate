@@ -19,7 +19,6 @@ return [
         'http' => [
             'not_found' => 'The requested resource could not be found or has been moved.',
             'unauthorized' => 'Authentication is required to access this resource.',
-            'forbidden' => 'You do not have the required permissions to reach this resource.',
             'forbidden_access' => 'You do not have the required permissions for this action.',
             'too_many_requests' => 'You have exceeded the allowed number of requests. Please try again in :seconds seconds.',
             'unsupported_media_type' => 'Unsupported media type. Use application/json request bodies.',

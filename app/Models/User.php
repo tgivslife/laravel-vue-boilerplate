@@ -4,6 +4,7 @@ namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
 use App\Models\Concerns\HasPreferences;
+use App\Models\Concerns\HasRequiredPermissions;
 use App\Notifications\ResetPasswordNotification;
 use App\Services\Access\DeletedEmailHasher;
 use App\Support\Device;
@@ -23,7 +24,7 @@ use Spatie\Permission\Traits\HasRoles;
 class User extends Authenticatable implements HasLocalePreference
 {
     /** @use HasFactory<UserFactory> */
-    use HasFactory, Notifiable, HasApiTokens, HasPreferences, HasRoles, SoftDeletes;
+    use HasFactory, Notifiable, HasApiTokens, HasPreferences, HasRequiredPermissions, HasRoles, SoftDeletes;
 
     /**
      * The attributes that are mass assignable.

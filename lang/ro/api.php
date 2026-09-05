@@ -19,7 +19,6 @@ return [
         'http' => [
             'not_found' => 'Resursa solicitată nu a putut fi găsită sau a fost mutată.',
             'unauthorized' => 'Este necesară autentificarea pentru a accesa această resursă.',
-            'forbidden' => 'Nu ai permisiunile necesare pentru a accesa această resursă.',
             'forbidden_access' => 'Nu ai permisiunile necesare pentru această acțiune.',
             'too_many_requests' => 'Ai depășit numărul permis de cereri. Te rugăm să încerci din nou în :seconds secunde.',
             'unsupported_media_type' => 'Tip de conținut neacceptat. Folosește corpuri de cerere application/json.',

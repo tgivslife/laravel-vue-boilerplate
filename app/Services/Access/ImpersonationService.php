@@ -57,7 +57,9 @@ readonly class ImpersonationService
             ]);
         }
 
-        if (!$this->access->allowsRecord($actor, $target, 'view')) {
+        // UserPolicy::impersonate - one composition point for capability + record reach.
+        // The stricter tier rule below is rank, not reach, and deliberately stays here.
+        if ($actor->cannot('impersonate', $target)) {
             throw new NotFoundHttpException;
         }
 

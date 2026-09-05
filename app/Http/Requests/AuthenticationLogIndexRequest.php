@@ -2,8 +2,11 @@
 
 namespace App\Http\Requests;
 
+use App\Models\User;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Query parameters for an authentication-log page, shared by the settings history and the admin user detail page.
@@ -12,11 +15,15 @@ use Illuminate\Foundation\Http\FormRequest;
 final class AuthenticationLogIndexRequest extends FormRequest
 {
     /**
-     * Determine if the user is authorized to make this request.
+     * On the admin flavor (a bound {user}) the record-scope verdict (UserPolicy) must answer here, before validation,
+     * an unknown id 404s at binding, so an out-of-scope target must 404 too - not leak a 422 when the query string happens to be invalid.
+     * The settings flavor binds no user (the actor reads their own history) and stays middleware-only.
      */
-    public function authorize(): bool
+    public function authorize(): bool|Response
     {
-        return true;
+        $target = $this->route('user');
+
+        return $target instanceof User ? Gate::inspect('view', $target) : true;
     }
 
     /**

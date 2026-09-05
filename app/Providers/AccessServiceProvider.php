@@ -2,6 +2,8 @@
 
 namespace App\Providers;
 
+use App\Models\User;
+use App\Policies\UserPolicy;
 use App\Services\Access\AccessScope;
 use Illuminate\Contracts\Auth\Access\Authorizable;
 use Illuminate\Database\Eloquent\Relations\Relation;
@@ -28,14 +30,13 @@ class AccessServiceProvider extends ServiceProvider
     {
         $this->enforceMorphMap();
         $this->registerSuperAdminBypass();
+        $this->registerPolicies();
     }
 
     /**
-     * Merge the protectable aliases into the application's enforced morph
-     * map (declared in AppServiceProvider). The map doubles as the
-     * protectables whitelist: a model absent from it cannot be stored in
-     * any *_type column, so nothing can be protected (or audited) by
-     * accident.
+     * Merge the protectable aliases into the application's enforced morph map (declared in AppServiceProvider).
+     * The map doubles as the protectables whitelist: a model absent from it cannot be stored in any *_type column,
+     * so nothing can be protected (or audited) by accident.
      */
     private function enforceMorphMap(): void
     {
@@ -56,5 +57,13 @@ class AccessServiceProvider extends ServiceProvider
                 ? true
                 : null;
         });
+    }
+
+    /**
+     * Record-level policies, registered explicitly so the wiring is grep-able (no reliance on policy auto-discovery).
+     */
+    private function registerPolicies(): void
+    {
+        Gate::policy(User::class, UserPolicy::class);
     }
 }

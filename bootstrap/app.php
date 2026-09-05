@@ -6,7 +6,6 @@ use App\Http\Middleware\RecordSessionActivity;
 use App\Http\Middleware\SetRequestLocale;
 use App\Http\Middleware\SetSecurityHeaders;
 use App\Http\Responses\JsonErrorResponse;
-use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -102,14 +101,6 @@ return Application::configure(basePath: dirname(__DIR__))
             )->toResponse($request);
         });
 
-        $exceptions->render(static function (AuthorizationException $e, Request $request) {
-            return new JsonErrorResponse(
-                title: __('api.errors.titles.forbidden'),
-                status: Response::HTTP_FORBIDDEN,
-                detail: __('api.errors.http.forbidden')
-            )->toResponse($request);
-        });
-
         $exceptions->render(static function (AccessDeniedHttpException $e, Request $request) {
             return new JsonErrorResponse(
                 title: __('api.errors.titles.forbidden'),
@@ -168,6 +159,13 @@ return Application::configure(basePath: dirname(__DIR__))
                 $e instanceof MethodNotAllowedHttpException => [
                     __('api.errors.titles.method_not_allowed'),
                     __('api.errors.http.method_not_allowed', ['method' => $request->method()]),
+                ],
+                // Authorization denials carrying a status (Response::denyAsNotFound) reach here as a plain
+                // HttpException, not NotFoundHttpException - prepareException() rewrites them before the
+                // renderers run, so the dedicated 404 renderer above never sees them.
+                $status === 404 => [
+                    __('api.errors.titles.not_found'),
+                    __('api.errors.http.not_found'),
                 ],
                 $status === 419 => [
                     __('api.errors.titles.page_expired'),

@@ -36,6 +36,8 @@ class UserAccountController extends Controller
      */
     public function update(UserAccountUpdateRequest $request, User $user): JsonResponse
     {
+        $this->authorize('update', $user);
+
         $this->accessControl->updateUserAccount($request->user(), $user, $request->validated());
 
         return new JsonSuccessResponse(
@@ -52,6 +54,8 @@ class UserAccountController extends Controller
      */
     public function forcePasswordReset(Request $request, User $user): JsonResponse
     {
+        $this->authorize('update', $user);
+
         $temporaryPassword = $this->accessControl->forcePasswordReset($request->user(), $user);
 
         return new JsonSuccessResponse(
@@ -71,7 +75,10 @@ class UserAccountController extends Controller
     public function resendInvitation(Request $request, User $user): JsonResponse
     {
         // Disabled like the self-service endpoints: the door does not exist.
+        // The kill-switch answers before the scope check so a disabled feature 404s identically for everyone.
         abort_unless((bool) config('security.invitations.enabled', true), Response::HTTP_NOT_FOUND);
+
+        $this->authorize('update', $user);
 
         $this->accessControl->resendInvitation($request->user(), $user);
 
@@ -90,7 +97,10 @@ class UserAccountController extends Controller
     public function resetTwoFactor(Request $request, User $user): JsonResponse
     {
         // Disabled like the self-service endpoints: the door does not exist.
+        // The kill-switch answers before the scope check so a disabled feature 404s identically for everyone.
         abort_unless((bool) config('security.two_factor.enabled', true), Response::HTTP_NOT_FOUND);
+
+        $this->authorize('update', $user);
 
         $this->accessControl->resetTwoFactor($request->user(), $user);
 
@@ -106,6 +116,8 @@ class UserAccountController extends Controller
      */
     public function destroy(Request $request, User $user): JsonResponse
     {
+        $this->authorize('delete', $user);
+
         $this->accessControl->deleteUser($request->user(), $user);
 
         return new JsonSuccessResponse(
@@ -121,6 +133,8 @@ class UserAccountController extends Controller
      */
     public function sessions(Request $request, User $user): JsonResponse
     {
+        $this->authorize('view', $user);
+
         $live = $this->sessionRegistry->forUser($user);
 
         return new JsonSuccessResponse(
@@ -141,6 +155,8 @@ class UserAccountController extends Controller
      */
     public function authenticationLogs(AuthenticationLogIndexRequest $request, User $user): JsonResponse
     {
+        $this->authorize('view', $user);
+
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: 'Authentication log retrieved successfully',
@@ -154,6 +170,8 @@ class UserAccountController extends Controller
      */
     public function auditLogs(Request $request, User $user): JsonResponse
     {
+        $this->authorize('view', $user);
+
         $entries = AccessAuditLog::query()
             ->where('subject_type', $user->getMorphClass())
             ->where('subject_id', $user->getKey())

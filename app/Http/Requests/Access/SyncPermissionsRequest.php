@@ -2,8 +2,11 @@
 
 namespace App\Http\Requests\Access;
 
+use App\Models\User;
+use Illuminate\Auth\Access\Response;
 use Illuminate\Contracts\Validation\ValidationRule;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 
 /**
@@ -12,12 +15,16 @@ use Illuminate\Validation\Rule;
 final class SyncPermissionsRequest extends FormRequest
 {
     /**
-     * Authorization is enforced by the route middleware (the configured
-     * admin capability); the lockout invariants live in the service.
+     * The capability is enforced by the route middleware and the lockout invariants live in the service,
+     * but on the user flavor the record-scope verdict (UserPolicy) must answer here, before validation: an
+     * unknown id 404s at binding, so an out-of-scope target must 404 too - not leak a 422 when the payload
+     * happens to be invalid. The role flavor binds no user and stays middleware-only (roles are global vocabulary).
      */
-    public function authorize(): bool
+    public function authorize(): bool|Response
     {
-        return true;
+        $target = $this->route('user');
+
+        return $target instanceof User ? Gate::inspect('update', $target) : true;
     }
 
     /**

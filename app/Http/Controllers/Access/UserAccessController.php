@@ -13,6 +13,7 @@ use App\Http\Responses\JsonSuccessResponse;
 use App\Models\User;
 use App\Services\Access\AccessControlService;
 use App\Support\Access\EscapedLikeFilter;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Spatie\QueryBuilder\AllowedFilter;
@@ -41,7 +42,7 @@ class UserAccessController extends Controller
      */
     public function index(UserIndexRequest $request): JsonResponse
     {
-        $users = $this->filteredUsers()
+        $users = $this->filteredUsers($request->user())
             // roles.permissions feeds the per-row reach verdicts (manageable/impersonable) without an extra query per row.
             ->with(['roles:id,name', 'roles.permissions:id,name', 'permissions:id,name'])
             ->paginate((int) ($request->validated('per_page') ?? config('access.user_browser.per_page', 25)));
@@ -59,26 +60,30 @@ class UserAccessController extends Controller
 
     /**
      * Headline counts for the users browser: population, health and this week's intake.
+     * Every count runs over the actor's visibleTo() slice - deployment-wide totals would leak the
+     * existence of out-of-scope accounts through the numbers.
      * The delta compares the new accounts of the last seven days against the seven days before; it is null when
      * the earlier window is empty (no baseline to compare against).
      */
     public function stats(Request $request): JsonResponse
     {
+        $scoped = static fn(): Builder => User::query()->visibleTo($request->user());
+
         $weekAgo = now()->subWeek();
         $twoWeeksAgo = now()->subWeeks(2);
 
-        $newThisWeek = User::where('created_at', '>=', $weekAgo)->count();
-        $newPreviousWeek = User::whereBetween('created_at', [$twoWeeksAgo, $weekAgo])->count();
+        $newThisWeek = $scoped()->where('created_at', '>=', $weekAgo)->count();
+        $newPreviousWeek = $scoped()->whereBetween('created_at', [$twoWeeksAgo, $weekAgo])->count();
 
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: 'User statistics retrieved successfully',
             data: [
                 'stats' => [
-                    'total' => User::count(),
-                    'active' => User::where('is_active', true)->whereNull('banned_at')->count(),
-                    'unverified' => User::whereNull('email_verified_at')->count(),
-                    'deleted' => User::onlyTrashed()->count(),
+                    'total' => $scoped()->count(),
+                    'active' => $scoped()->where('is_active', true)->whereNull('banned_at')->count(),
+                    'unverified' => $scoped()->whereNull('email_verified_at')->count(),
+                    'deleted' => $scoped()->onlyTrashed()->count(),
                     'new_this_week' => $newThisWeek,
                     'new_this_week_delta' => $newPreviousWeek > 0
                         ? (int) round((($newThisWeek - $newPreviousWeek) / $newPreviousWeek) * 100)
@@ -94,7 +99,7 @@ class UserAccessController extends Controller
      */
     public function export(UserIndexRequest $request): StreamedResponse
     {
-        $users = $this->filteredUsers()->with('roles:id,name');
+        $users = $this->filteredUsers($request->user())->with('roles:id,name');
 
         return new StreamedResponse(static function () use ($users): void {
             $out = fopen('php://output', 'w');
@@ -170,13 +175,14 @@ class UserAccessController extends Controller
     /**
      * The filter surface shared by the index and the export: bound LIKE search over the configured columns,
      * plus role, status, two-factor posture and onboarding narrowing.
+     * Built on visibleTo() so both surfaces show exactly the actor's slice and cannot diverge from each other.
      * `deleted` opts into the tombstoned rows the soft-delete scope hides; every other status only ever sees live accounts.
      * The `two_factor` values mirror the list column's three states; `onboarding` collects the not-fully-landed
      * flavors, with `invited` matching the invitation badge's derivation exactly (invitable + a live link).
      */
-    private function filteredUsers(): QueryBuilder
+    private function filteredUsers(User $actor): QueryBuilder
     {
-        return QueryBuilder::for(User::class)
+        return QueryBuilder::for(User::query()->visibleTo($actor))
             ->withExists(['invitationTokens as invitation_pending' => static fn($query) => $query->live()])
             ->allowedFilters(
                 AllowedFilter::custom('search', new EscapedLikeFilter(config('access.user_browser.search_columns'))),
@@ -210,8 +216,12 @@ class UserAccessController extends Controller
 
     /**
      * Answer "is this email an account - or was it ever?": live accounts by the address itself,
-     * retired ones by the tombstone hash (whereDeletedEmail), newest retirement first when the
-     * address had several lives. Sits behind users.view, so no enumeration surface is added.
+     * retired ones by the tombstone hash (whereDeletedEmail), newest reachable retirement first when
+     * the address had several lives. Sits behind users.view, so no enumeration surface is added.
+     *
+     * A match outside the actor's record scope - live or retired - answers 'none' with user: null,
+     * exactly like an unknown address. Membership therefore never confirms an out-of-scope account;
+     * creation still collides (the store request's global unique rule 422s on the address).
      */
     public function membership(UserMembershipRequest $request): JsonResponse
     {
@@ -219,9 +229,17 @@ class UserAccessController extends Controller
 
         $user = User::query()->where('email', $email)->first();
 
+        // The tombstone lookup is scoped in the query, not post-filtered, so a multi-life address answers
+        // its newest *reachable* retirement rather than 'none' when the newest one is out of scope. It only
+        // runs when no live account holds the address, so a vetoed live match cannot resurface a tombstone.
         $deleted = $user === null
-            ? User::onlyTrashed()->whereDeletedEmail($email)->orderByDesc('deleted_at')->first()
+            ? User::onlyTrashed()->visibleTo($request->user())->whereDeletedEmail($email)
+                ->orderByDesc('deleted_at')->first()
             : null;
+
+        if ($user !== null && !$user->userCan($request->user(), 'view')) {
+            $user = null;
+        }
 
         $match = $user ?? $deleted;
 
@@ -244,6 +262,8 @@ class UserAccessController extends Controller
      */
     public function show(Request $request, User $user): JsonResponse
     {
+        $this->authorize('view', $user);
+
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: 'User retrieved successfully',
@@ -256,6 +276,8 @@ class UserAccessController extends Controller
      */
     public function syncRoles(SyncUserRolesRequest $request, User $user): JsonResponse
     {
+        $this->authorize('update', $user);
+
         $this->accessControl->syncUserRoles($request->user(), $user, $request->validated('role_ids'));
 
         return new JsonSuccessResponse(
@@ -270,6 +292,8 @@ class UserAccessController extends Controller
      */
     public function syncPermissions(SyncPermissionsRequest $request, User $user): JsonResponse
     {
+        $this->authorize('update', $user);
+
         $this->accessControl->syncUserPermissions($request->user(), $user, $request->validated('permission_ids'));
 
         return new JsonSuccessResponse(

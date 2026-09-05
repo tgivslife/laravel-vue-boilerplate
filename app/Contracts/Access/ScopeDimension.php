@@ -7,13 +7,18 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * An application-defined visibility dimension (tenant, region, department...)
- * composed into every record-level access decision alongside capabilities
- * and required-permission rules.
+ * An application-defined visibility dimension (tenant, region, department...) composed into every record-level access
+ * decision alongside capabilities and required-permission rules.
  *
- * Implementations are listed in config/access.php `dimensions` and resolved
- * from the container. Both forms of the same question must agree: constrain()
- * narrows index queries to exactly the records allows() would accept.
+ * Implementations are listed in config/access.php `dimensions` and resolved from the container.
+ * Both forms of the same question must agree: constrain() narrows index queries to exactly the records allows() would accept.
+ *
+ * Implementations must answer for soft-deleted records too - the admin surface resolves tombstoned accounts so deletion audit entries stay readable.
+ * AccountRetirementService severs credentials and tombstones the email but does not clear application columns;
+ * if the axis attribute can be null or unreadable on a retired record, fail closed (deny) rather than defaulting to visible.
+ *
+ * A User-claiming dimension should place the actor's own record inside their slice unless self-invisibility is intended:
+ * an actor absent from their own slice disappears from their own console (self reads 404, the index and stats answer empty).
  */
 interface ScopeDimension
 {
