@@ -74,6 +74,7 @@ return [
             'driver' => 'redis',
             'connection' => env('REDIS_QUEUE_CONNECTION', 'queue'),
             'queue' => env('REDIS_QUEUE', env('REDIS_TOPOLOGY', 'standalone') === 'cluster' ? '{default}' : 'default'),
+            // Must exceed the longest job timeout, or a still-running job would be handed to a second worker mid-flight.
             'retry_after' => (int) env('REDIS_QUEUE_RETRY_AFTER', 90),
             'block_for' => null,
             'after_commit' => false,
