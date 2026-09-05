@@ -8,11 +8,9 @@ use Spatie\Permission\PermissionRegistrar;
 /**
  * Seeds the baseline roles in the configured guard.
  *
- * The ladder: super-admin (break-glass bypass, protected in the admin
- * API) and admin (every capability). Further roles are composed at
- * runtime through the admin UI. Grants are synced from the seeded
- * vocabulary, so resources added to config/access.php are picked up on
- * reseed without touching this file.
+ * The ladder: super-admin (break-glass bypass, protected in the admin API) and admin (every capability). Further roles
+ * are composed at runtime through the admin UI. Grants are synced from the seeded vocabulary, so resources added to
+ * config/access.php are picked up on reseed without touching this file.
  */
 class RoleSeeder extends Seeder
 {

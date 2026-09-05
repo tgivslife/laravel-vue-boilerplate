@@ -8,9 +8,8 @@ use Spatie\Permission\PermissionRegistrar;
 /**
  * Seeds the capability vocabulary from config/access.php.
  *
- * Permissions are code-defined on purpose: the application is written
- * against these names, so they are seeded (idempotently) rather than
- * managed through the UI. Roles are the runtime-composed layer.
+ * Permissions are code-defined on purpose: the application is written against these names, so they are seeded (idempotently)
+ * rather than managed through the UI. Roles are the runtime-composed layer.
  */
 class PermissionSeeder extends Seeder
 {
