@@ -139,7 +139,9 @@ swapped — Sentinel behavior, not a bug.
 | --- | --- | --- |
 | `REDIS_TOPOLOGY` | `standalone` | `standalone` \| `sentinel` \| `cluster`; anything else refuses to boot. |
 | `REDIS_CLIENT` | `phpredis` | standalone/cluster only — sentinel always uses the app driver. |
-| `REDIS_HOST` / `REDIS_PORT` | `127.0.0.1` / `6379` | Server (standalone) or seed node (cluster); ignored under sentinel. |
+| `REDIS_HOST` / `REDIS_PORT` | `127.0.0.1` / `6379` | Server (standalone) or single-seed fallback when `REDIS_CLUSTER_SEEDS` is unset (cluster); ignored under sentinel. |
+| `REDIS_CLUSTER_SEEDS` | *(unset)* | Cluster only: comma-separated seed nodes (`host`, `host:port`, `[v6]:port`; port defaults to 6379 — same parser as the sentinel list, `App\Support\Redis\HostListParser`). phpredis boots off the first seed that answers, so more seeds only remove the one-node boot dependency. |
+| `REDIS_USERNAME` / `REDIS_PASSWORD` | *(unset)* | Data-node credentials. On cluster they authenticate at the client level — `RedisCluster` reduces node entries to `host:port`, so credentials placed per-node would silently vanish (NOAUTH). |
 | `REDIS_DB` / `REDIS_CACHE_DB` / `REDIS_SESSION_DB` / `REDIS_QUEUE_DB` | `0/1/2/3` | Per-connection DB indexes (standalone + sentinel). |
 | `REDIS_SENTINEL_HOSTS` | `127.0.0.1:26379` | Comma-separated sentinels; port defaults to 26379. |
 | `REDIS_SENTINEL_SERVICE` | `mymaster` | The monitored master-set name. |

@@ -1,5 +1,6 @@
 <?php
 
+use App\Support\Redis\HostListParser;
 use Illuminate\Support\Str;
 use Pdo\Mysql;
 
@@ -147,10 +148,11 @@ return [
     | registered in AppServiceProvider) - phpredis itself has no Sentinel support and Laravel's stock
     | connector pins the host it first saw. Failover retry semantics and sizing: docs/redis.md.
     |
-    | cluster: the same connection names are defined under `clusters` from a single seed node (a name
-    | defined at the top level would shadow its cluster twin). No database indexes, so sessions fall
-    | back to key-prefix isolation, and cache:clear (per-node FLUSHDB) would wipe every co-tenant -
-    | see auth:flush-sessions before reaching for it.
+    | cluster: the same connection names are defined under `clusters` from the REDIS_CLUSTER_SEEDS
+    | list (a name defined at the top level would shadow its cluster twin). Credentials and timeouts
+    | live in the client options - node entries are reduced to host:port. No database indexes, so
+    | sessions fall back to key-prefix isolation, and cache:clear (per-node FLUSHDB) would wipe every
+    | co-tenant - see auth:flush-sessions before reaching for it.
     |
     */
 
@@ -214,14 +216,29 @@ return [
             'retry_deadline' => env('REDIS_SENTINEL_RETRY_DEADLINE', 5000),
         ]);
 
-        $clusterNode = static fn(): array => [
-            'url' => env('REDIS_URL'),
-            'host' => env('REDIS_HOST', '127.0.0.1'),
-            'username' => env('REDIS_USERNAME'),
-            'password' => env('REDIS_PASSWORD'),
-            'port' => env('REDIS_PORT', '6379'),
-            'database' => '0',
-        ];
+        /*
+         * Cluster seed nodes (REDIS_CLUSTER_SEEDS, comma-separated; REDIS_HOST:REDIS_PORT as the single-seed fallback).
+         * Every entry is only a boot candidate: phpredis connects to the first seed that answers and follows CLUSTER SLOTS from there,
+         *  so listing all nodes just removes the one-seed boot dependency.
+         * Credentials and timeouts do NOT belong on the nodes - the connector reduces each entry to host:port and discards the rest;
+         * RedisCluster reads them from the client `options` below.
+         */
+        $clusterSeeds = static function (): array {
+            $seeds = new HostListParser('REDIS_CLUSTER_SEEDS', 6379)->parseHosts(
+                env('REDIS_CLUSTER_SEEDS')
+                ?? env('REDIS_HOST', '127.0.0.1').':'.env('REDIS_PORT', '6379'),
+            );
+
+            if ($seeds === []) {
+                throw new RuntimeException('REDIS_CLUSTER_SEEDS is empty - list at least one host:port seed node.');
+            }
+
+            return array_map(static fn(array $seed): array => [
+                'host' => $seed[0],
+                'port' => (string) $seed[1],
+                'database' => '0',
+            ], $seeds);
+        };
 
         return match ($topology) {
             'standalone' => [
@@ -260,11 +277,24 @@ return [
 
             'cluster' => [
                 'client' => env('REDIS_CLIENT', 'phpredis'),
-                'options' => $options,
+
+                /*
+                 * RedisCluster authenticates and times out at the client level, so credentials live here and not on the node entries,
+                 * a password left on a node is silently discarded and surfaces as NOAUTH.
+                 * Timeouts are bounded for the same reason as sentinel: phpredis defaults to infinite, and a node that
+                 * accepts the handshake but never answers must fail into an error instead of hanging the request.
+                 */
+                'options' => $options + array_filter([
+                        'username' => env('REDIS_USERNAME'),
+                        'password' => env('REDIS_PASSWORD'),
+                    ]) + [
+                        'timeout' => env('REDIS_TIMEOUT', 2.0),
+                        'read_timeout' => env('REDIS_READ_TIMEOUT', 2.0),
+                    ],
 
                 'clusters' => [
-                    'default' => [$clusterNode()],
-                    'cache' => [$clusterNode()],
+                    'default' => $clusterSeeds(),
+                    'cache' => $clusterSeeds(),
 
                     /*
                      * Sessions share the cluster keyspace with everything else, so a client-level key
@@ -272,7 +302,7 @@ return [
                      * auth:flush-sessions deletes by prefix scan here instead of FLUSHDB.
                      */
                     'sessions' => [
-                        $clusterNode(),
+                        ...$clusterSeeds(),
                         'options' => [
                             'prefix' => env('REDIS_SESSIONS_PREFIX', $appSlug.'-sessions-'),
                         ],
@@ -282,7 +312,7 @@ return [
                      * The queue and Horizon (config/horizon.php `use`).
                      * Horizon hash-tags its own keys on a cluster, and the queue name gains a {hash tag} in config/queue.php.
                      */
-                    'queue' => [$clusterNode()],
+                    'queue' => $clusterSeeds(),
                 ],
             ],
 

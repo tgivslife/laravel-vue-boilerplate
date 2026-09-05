@@ -13,6 +13,7 @@
 /public/storage
 /public/hot
 *.sqlite
+*.sql
 
 ### --- Frontend (Vue.js / Vite) --- ###
 /node_modules

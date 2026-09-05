@@ -7,8 +7,8 @@ use Tests\TestCase;
 
 /**
  * The REDIS_TOPOLOGY switch reshapes config/database.php and config/queue.php; the files are
- * re-evaluated here under each topology because the suite's own config is already loaded and
- * cached. Every test pins REDIS_TOPOLOGY explicitly so a developer's local .env cannot bleed in.
+ * re-evaluated here under each topology because the suite's own config is already loaded and cached.
+ * Every test pins REDIS_TOPOLOGY explicitly so a developer's local .env cannot bleed in.
  */
 class RedisTopologyConfigTest extends TestCase
 {
@@ -131,6 +131,93 @@ class RedisTopologyConfigTest extends TestCase
             $sessionsPrefix,
             'auth:flush-sessions needs a sessions prefix distinct from the shared one'
         );
+    }
+
+    public function test_cluster_mode_authenticates_and_bounds_timeouts_at_the_client_level(): void
+    {
+        $redis = $this->loadConfig('database', [
+            'REDIS_TOPOLOGY' => 'cluster',
+            'REDIS_USERNAME' => 'app',
+            'REDIS_PASSWORD' => 'secret',
+        ])['redis'];
+
+        /*
+         * RedisCluster reads credentials from the client options; anything on the node entries is
+         * reduced to host:port and discarded, which is how a password left there turns into NOAUTH.
+         */
+        $this->assertSame('app', $redis['options']['username']);
+        $this->assertSame('secret', $redis['options']['password']);
+
+        // Bounded socket timeouts, for the same reason as sentinel: phpredis defaults to infinite.
+        $this->assertGreaterThan(0, (float) $redis['options']['timeout']);
+        $this->assertGreaterThan(0, (float) $redis['options']['read_timeout']);
+    }
+
+    public function test_cluster_seeds_expand_into_one_node_per_entry(): void
+    {
+        $redis = $this->loadConfig('database', [
+            'REDIS_TOPOLOGY' => 'cluster',
+            'REDIS_CLUSTER_SEEDS' => ' 172.20.10.80:7001, 172.20.10.81:7003 ,172.20.10.82:7005 ',
+        ])['redis'];
+
+        $hostPorts = static fn(array $nodes): array => array_map(
+            static fn(array $node): string => $node['host'].':'.$node['port'],
+            $nodes,
+        );
+
+        foreach (['default', 'cache', 'queue'] as $name) {
+            $this->assertSame(
+                ['172.20.10.80:7001', '172.20.10.81:7003', '172.20.10.82:7005'],
+                $hostPorts($redis['clusters'][$name]),
+            );
+        }
+
+        // Sessions carries the same seeds with its prefix options entry sitting beside them.
+        $sessions = $redis['clusters']['sessions'];
+
+        $this->assertArrayHasKey('options', $sessions);
+        unset($sessions['options']);
+        $this->assertSame(['172.20.10.80:7001', '172.20.10.81:7003', '172.20.10.82:7005'], $hostPorts($sessions));
+    }
+
+    public function test_cluster_seeds_fall_back_to_the_single_redis_host_and_port(): void
+    {
+        $redis = $this->loadConfig('database', [
+            'REDIS_TOPOLOGY' => 'cluster',
+            'REDIS_HOST' => '10.1.1.1',
+            'REDIS_PORT' => '7000',
+        ])['redis'];
+
+        $this->assertSame(
+            [['host' => '10.1.1.1', 'port' => '7000', 'database' => '0']],
+            $redis['clusters']['default'],
+        );
+    }
+
+    public function test_cluster_seed_parsing_reads_ipv6_literals_like_the_sentinel_list(): void
+    {
+        $redis = $this->loadConfig('database', [
+            'REDIS_TOPOLOGY' => 'cluster',
+            'REDIS_CLUSTER_SEEDS' => '[fd00::1]:7001,fd00::2',
+        ])['redis'];
+
+        [$bracketed, $bare] = $redis['clusters']['default'];
+
+        $this->assertSame(['fd00::1', '7001'], [$bracketed['host'], $bracketed['port']]);
+
+        // A bare IPv6 literal is all colons: a bare address on the default port, never a last-colon split.
+        $this->assertSame(['fd00::2', '6379'], [$bare['host'], $bare['port']]);
+    }
+
+    public function test_an_empty_cluster_seed_list_fails_loudly(): void
+    {
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageIsOrContains('REDIS_CLUSTER_SEEDS is empty');
+
+        $this->loadConfig('database', [
+            'REDIS_TOPOLOGY' => 'cluster',
+            'REDIS_CLUSTER_SEEDS' => ' , ',
+        ]);
     }
 
     public function test_an_unknown_topology_fails_loudly(): void

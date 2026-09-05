@@ -54,7 +54,9 @@ class SentinelClientFactoryTest extends TestCase
                 $this->factory->parseHosts($entry);
                 $this->fail("Expected [{$entry}] to be refused.");
             } catch (RuntimeException $exception) {
-                $this->assertStringContainsString('Invalid sentinel port', $exception->getMessage());
+                $this->assertStringContainsString('Invalid port', $exception->getMessage());
+                $this->assertStringContainsString('REDIS_SENTINEL_HOSTS', $exception->getMessage(),
+                    'the error must name the setting to fix');
                 $this->assertStringContainsString($entry, $exception->getMessage());
             }
         }
