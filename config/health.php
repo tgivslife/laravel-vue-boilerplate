@@ -8,8 +8,8 @@ return [
     |--------------------------------------------------------------------------
     |
     | Which health probes run (see App\Services\Ops\HealthCheckService).
-    | Critical probes (database, cache, sessions) also guard the framework's /up endpoint through the
-    | DiagnosingHealth listener: a failure turns the load balancer's 200 into a 500.
+    | Critical probes (database, cache, sessions) also guard the /up endpoint (App\Http\Controllers\Ops\HealthController):
+    | a failure turns the load balancer's 200 into a 500.
     | Non-critical probes only surface in the health:check report.
     |
     | The sessions probe only applies when sessions live on redis, the queue probe when the queue is database-backed,

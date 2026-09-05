@@ -128,9 +128,11 @@ same env; Horizon's dashboard is served by the web pods at `/horizon` behind the
 
 - **`/ping`** — nginx → php-fpm's ping endpoint. Proves the web chain without booting Laravel; this is the image's
   built-in `HEALTHCHECK` and the right **liveness** probe.
-- **`/up`** — Laravel's health route; proves the framework boots. Mind `TrustHosts`: outside local/testing, a probe that
-  sends the pod IP as its `Host` header is **rejected with a 400** — a readiness probe against `/up` must send a real
-  host header, e.g.:
+- **`/up`** — the readiness route (`HealthController`): runs the critical probes from `config/health.php`, answers 200
+  or 500 (failing probe named on the page, its detail in the log; `{"status": "up"|"down", "maintenance": bool}` for
+  JSON), and stays 200 in maintenance mode - the instance must remain in rotation to serve the maintenance page, so
+  the flag is informational. Mind `TrustHosts`: outside local/testing, a probe that sends the pod IP as its `Host`
+  header is **rejected with a 400** — send a real host header, e.g.:
 
   ```yaml
   readinessProbe:

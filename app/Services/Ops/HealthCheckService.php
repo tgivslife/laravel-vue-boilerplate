@@ -15,8 +15,8 @@ use RuntimeException;
 use Throwable;
 
 /**
- * Runs the application's health probes: critical ones (database, cache, redis sessions) gate the framework's /up endpoint
- * via the DiagnosingHealth listener, the rest only surface in the health:check report.
+ * Runs the application's health probes: critical ones (database, cache, redis sessions) gate the /up endpoint
+ * (HealthController), the rest only surface in the health:check report.
  *
  * Probes that do not apply to the current configuration (redis sessions on a database-session deployment,
  * queue-table checks on a non-database queue, the Horizon probe on a non-redis queue) exclude themselves

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Ops\HealthController;
 use App\Http\Middleware\AttachRequestId;
 use App\Http\Middleware\EnsureJsonApiRequest;
 use App\Http\Middleware\RecordSessionActivity;
@@ -11,6 +12,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Validation\ValidationException;
 use Laravel\Sanctum\Http\Middleware\CheckAbilities;
 use Laravel\Sanctum\Http\Middleware\CheckForAnyAbility;
@@ -26,7 +28,9 @@ return Application::configure(basePath: dirname(__DIR__))
         web: __DIR__.'/../routes/web.php',
         api: __DIR__.'/../routes/api.php',
         commands: __DIR__.'/../routes/console.php',
-        health: '/up',
+        then: function (): void {
+            Route::get('up', [HealthController::class, 'show'])->name('health');
+        },
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware
@@ -34,7 +38,8 @@ return Application::configure(basePath: dirname(__DIR__))
             ->throttleApi()
             // The allowed proxies/hosts are supplied in SecurityServiceProvider::boot().
             ->trustProxies()
-            ->trustHosts();
+            ->trustHosts()
+            ->preventRequestsDuringMaintenance(except: ['up']);
 
         /*
          * Response security headers (HSTS, CSP, baseline hardening) on every
