@@ -28,7 +28,7 @@ final class RoleAuditLogIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'filter.role_id' => ['sometimes', 'integer'],
+            'filter.role_id' => ['sometimes', 'filled', 'integer'],
         ];
     }
 }

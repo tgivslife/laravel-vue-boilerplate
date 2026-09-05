@@ -34,7 +34,7 @@ final class AuthenticationLogIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'date' => ['sometimes', 'date_format:Y-m-d'],
+            'date' => ['sometimes', 'filled', 'date_format:Y-m-d'],
         ];
     }
 }

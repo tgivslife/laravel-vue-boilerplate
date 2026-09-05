@@ -26,16 +26,16 @@ final class UserIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'filter.search' => ['sometimes', 'string', 'max:255'],
+            'filter.search' => ['sometimes', 'filled', 'string', 'max:255'],
             'filter.role_id' => [
-                'sometimes', 'integer',
+                'sometimes', 'filled', 'integer',
                 Rule::exists(config('permission.table_names.roles'), 'id')
                     ->where('guard_name', config('access.guard')),
             ],
-            'filter.status' => ['sometimes', 'string', Rule::in(['active', 'inactive', 'banned', 'deleted'])],
-            'filter.two_factor' => ['sometimes', 'string', Rule::in(['enabled', 'required', 'disabled'])],
-            'filter.onboarding' => ['sometimes', 'string', Rule::in(['invited', 'reset_pending', 'unverified'])],
-            'per_page' => ['sometimes', 'integer', Rule::in([10, 25, 50, 100])],
+            'filter.status' => ['sometimes', 'filled', 'string', Rule::in(['active', 'inactive', 'banned', 'deleted'])],
+            'filter.two_factor' => ['sometimes', 'filled', 'string', Rule::in(['enabled', 'required', 'disabled'])],
+            'filter.onboarding' => ['sometimes', 'filled', 'string', Rule::in(['invited', 'reset_pending', 'unverified'])],
+            'per_page' => ['sometimes', 'filled', 'integer', Rule::in([10, 25, 50, 100])],
         ];
     }
 }

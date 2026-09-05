@@ -30,8 +30,8 @@ final class PermissionIndexRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'filter.search' => ['sometimes', 'string', 'max:255'],
-            'per_page' => ['sometimes', 'integer', Rule::in([10, 25, 50, 100])],
+            'filter.search' => ['sometimes', 'filled', 'string', 'max:255'],
+            'per_page' => ['sometimes', 'filled', 'integer', Rule::in([10, 25, 50, 100])],
         ];
     }
 }
