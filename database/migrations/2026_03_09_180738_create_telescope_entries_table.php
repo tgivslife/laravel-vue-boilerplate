@@ -14,6 +14,18 @@ return new class extends Migration {
     }
 
     /**
+     * Determine if this migration should run.
+     *
+     * Telescope is a dev-only dependency registered exclusively in the local environment (see AppServiceProvider::register()),
+     * so its tables are created only where the provider actually runs.
+     */
+    public function shouldRun(): bool
+    {
+        return class_exists(\Laravel\Telescope\TelescopeServiceProvider::class)
+            && app()->environment('local');
+    }
+
+    /**
      * Run the migrations.
      */
     public function up(): void
