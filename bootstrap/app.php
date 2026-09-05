@@ -3,6 +3,10 @@
 use App\Http\Controllers\Ops\HealthController;
 use App\Http\Middleware\AttachRequestId;
 use App\Http\Middleware\EnsureJsonApiRequest;
+use App\Http\Middleware\EnsurePasswordResetNotRequired;
+use App\Http\Middleware\EnsureSessionAuthenticated;
+use App\Http\Middleware\EnsureTwoFactorEnrolled;
+use App\Http\Middleware\EnsureUserCanAuthenticate;
 use App\Http\Middleware\RecordSessionActivity;
 use App\Http\Middleware\SetRequestLocale;
 use App\Http\Middleware\SetSecurityHeaders;
@@ -70,6 +74,20 @@ return Application::configure(basePath: dirname(__DIR__))
             'ability' => CheckForAnyAbility::class,
         ]);
 
+        /*
+         * The fully-established console session, defined once so the copies cannot drift: signed in,
+         * account allowed to authenticate, session past its second factor, no forced password reset
+         * pending, two-factor enrolled where mandated. Mirrors the SPA's `protected` layout boundary.
+         * The escape-hatch routes (password.update, two-factor enrollment, impersonation.stop) stay on
+         * hand-picked subsets of this stack - see routes/api/auth.php.
+         */
+        $middleware->group('protected', [
+            'auth:sanctum',
+            EnsureUserCanAuthenticate::class,
+            EnsureSessionAuthenticated::class,
+            EnsurePasswordResetNotRequired::class,
+            EnsureTwoFactorEnrolled::class,
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(function (Request $request, Throwable $e) {
