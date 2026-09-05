@@ -14,13 +14,14 @@ use Illuminate\Translation\PotentiallyTranslatedString;
  * saved with twenty permissions paid twenty round trips for a question a single `whereIn` count answers.
  *
  * Applied to the array attribute itself, so a failure names the array (`permission_ids`) rather than an index.
- * Keep `integer` on the `.*` entry beside it: shape is that rule's business, and entries it rejects are skipped here
- * so the two never report the same value twice.
+ * Shape stays the business of the `integer:strict` rule on the `.*` entries: the moment any entry is not a native
+ * integer that rule has already refused the request, so this one declines to answer for an ill-shaped array
+ * rather than second-guess what the shape rule admits - no value is ever reported twice, and nothing
+ * non-integer ever reaches the id query.
  *
- * Candidates are normalized with the same filter_var(FILTER_VALIDATE_INT) that Laravel's `integer` rule uses, rather
- * than an is_int()/ctype_digit() approximation of it. That approximation left a hole: `integer` also accepts the float
- * 42.0 (a bare JSON 42.0 literal), '+42' and ' 42', and every one of those slipped past the approximation unchecked -
- * so a nonexistent id was silently dropped downstream instead of failing, and a foreign-guard id reached the service.
+ * This rule is the friendly 422, not the security boundary: the service's own fetches are scoped to the guard
+ * (AccessControlService::rolesInGuard() / permissionsInGuard()), so a foreign-guard id cannot be attached even
+ * by a caller that never ran this validation.
  */
 final readonly class AllExistInGuard implements ValidationRule
 {
@@ -43,12 +44,13 @@ final readonly class AllExistInGuard implements ValidationRule
         $ids = [];
 
         foreach ($value as $candidate) {
-            $id = filter_var($candidate, FILTER_VALIDATE_INT);
-
-            // Anything `integer` would reject too; that rule reports it, so this one stays quiet.
-            if ($id !== false) {
-                $ids[$id] = true;
+            // Anything but a native integer already fails `integer:strict` on the element,
+            // so the whole request is refused on shape - existence has no answer worth adding.
+            if (!is_int($candidate)) {
+                return;
             }
+
+            $ids[$candidate] = true;
         }
 
         $ids = array_keys($ids);

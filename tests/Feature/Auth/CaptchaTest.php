@@ -103,6 +103,22 @@ class CaptchaTest extends TestCase
             ->assertJsonPath('title', __('api.auth.titles.captcha_failed'));
     }
 
+    public function test_a_non_scalar_token_is_refused_not_a_500(): void
+    {
+        // The gate reads captcha_token before validation; a bare (string) cast on an array value would throw
+        // "Array to string conversion" inside the middleware (a 500 with warnings promoted to exceptions). A
+        // non-string is not a token, so it takes the same empty-token refusal as a missing one.
+        $this->enableCaptcha();
+        $this->bindVerifier(true);
+        $user = $this->createUser();
+
+        $this->requestLink($user->email, ['captcha_token' => ['array-token']])
+            ->assertStatus(422)
+            ->assertJsonPath('title', __('api.auth.titles.captcha_failed'));
+
+        Notification::assertNothingSent();
+    }
+
     public function test_a_verified_token_opens_every_guarded_door(): void
     {
         $this->enableCaptcha();

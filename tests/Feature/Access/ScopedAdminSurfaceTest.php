@@ -268,14 +268,19 @@ class ScopedAdminSurfaceTest extends AccessTestCase
             $entries->firstWhere('actor.restricted', true), $entries->firstWhere('actor.id', $actor->id)
         ];
 
-        // Reachable actor: named as before.
+        // Reachable actor: named as before, IP included.
         $this->assertNotNull($own);
         $this->assertSame($actor->email, $own['actor']['email']);
         $this->assertFalse($own['actor']['restricted']);
+        $this->assertNotNull($own['ip_address']);
 
         // Out-of-scope actor: the marker and nothing else - not the email, name or even the id.
         $this->assertNotNull($withheld);
         $this->assertSame(['restricted' => true], $withheld['actor']);
+
+        // The IP travels with the identity: left behind it would correlate the redacted actor's entries with
+        // each other and with any address the viewer sees elsewhere, which is what the marker refuses.
+        $this->assertNull($withheld['ip_address']);
 
         // Belt and braces: the identity is absent from the whole payload, not merely from the actor object.
         $body = $this->getJson("/api/access/users/{$subject->id}/audit-logs")->assertOk()->content();

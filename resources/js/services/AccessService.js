@@ -194,6 +194,23 @@ export default class AccessService extends HttpClient {
         return this.get('/api/access/roles', params)
     }
 
+    /**
+     * Fetch a page of the role-surface audit feed, newest first.
+     * Deleted roles remain in the feed (the roles table hard-deletes), so a deleted role's id is a valid filter.
+     *
+     * @param {number} [page=1] - The feed page.
+     * @param {number|string|null} [roleId=null] - Narrow the feed to one role's entries.
+     */
+    fetchRoleAuditLog (page = 1, roleId = null) {
+        const params = { page }
+
+        if (roleId !== null) {
+            params.filter = { role_id: roleId }
+        }
+
+        return this.get('/api/access/roles/audit-logs', params)
+    }
+
     fetchRoleStats () {
         return this.get('/api/access/roles/stats')
     }

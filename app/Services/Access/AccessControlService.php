@@ -28,7 +28,7 @@ use Spatie\Permission\PermissionRegistrar;
  *  - self-revocation: the acting admin cannot strip their own effective grant of a lockout permission they held when the mutation began;
  *  - last man standing: a mutation cannot strip a lockout permission's last active holder (super admins count as holders of everything);
  *  - target ceiling: no mutation may touch an account holding the super-admin role or a privileged permission the actor lacks -
- *    including indirectly, through a role edit that would strip a privileged permission from such an account;
+ *    including indirectly, through a role edit that would strip a privileged permission from such an account or hand it one;
  *  - grant ceiling: permissions and roles being added must sit within what the actor effectively holds.
  *
  * The lockout invariants hold independently for each configured lockout permission.
@@ -55,7 +55,7 @@ final readonly class AccessControlService
     public function syncUserRoles(User $actor, User $target, array $roleIds): void
     {
         $this->mutate($actor, $target, function () use ($actor, $target, $roleIds): void {
-            $roles = $this->roleModel()::whereIn('id', $roleIds)->get();
+            $roles = $this->rolesInGuard($roleIds);
 
             $before = $target->roles()->pluck('name')->sort()->values()->all();
 
@@ -88,7 +88,7 @@ final readonly class AccessControlService
     public function syncUserPermissions(User $actor, User $target, array $permissionIds): void
     {
         $this->mutate($actor, $target, function () use ($actor, $target, $permissionIds): void {
-            $permissions = $this->permissionModel()::whereIn('id', $permissionIds)->get();
+            $permissions = $this->permissionsInGuard($permissionIds);
 
             $before = $target->getDirectPermissions()->pluck('name')->sort()->values()->all();
             $this->assertMayGrantPermissions($actor, array_diff($permissions->pluck('name')->all(), $before));
@@ -209,7 +209,7 @@ final readonly class AccessControlService
                 if ($roleIds !== []) {
                     // A brand-new account holds nothing, so the only membership change this can express is a grant.
                     $this->assertSuperAdminMembershipUnchanged($roleIds, []);
-                    $roles = $this->roleModel()::whereIn('id', $roleIds)->get();
+                    $roles = $this->rolesInGuard($roleIds);
                     $this->assertMayGrantRoles($actor, $roles);
                     $user->syncRoles($roles);
                 }
@@ -448,15 +448,17 @@ final readonly class AccessControlService
     public function syncRolePermissions(User $actor, RoleContract $role, array $permissionIds): void
     {
         $this->mutate($actor, null, function () use ($actor, $role, $permissionIds): void {
-            $permissions = $this->permissionModel()::whereIn('id', $permissionIds)->get();
+            $permissions = $this->permissionsInGuard($permissionIds);
 
             $before = $role->permissions()->pluck('name')->sort()->values()->all();
             $requested = $permissions->pluck('name')->all();
+            $added = array_diff($requested, $before);
 
             // Both ceilings read the pre-mutation state under the same lock: the grant ceiling bounds what the
-            // actor may add, the holder ceiling bounds whose tier the removals may shrink.
-            $this->assertMayGrantPermissions($actor, array_diff($requested, $before));
-            $this->assertRoleHoldersWithinTier($actor, $role, array_diff($before, $requested));
+            // actor may add, the holder ceiling bounds whose privileged composition the change may touch -
+            // in either direction, so the delta it sees is the symmetric difference.
+            $this->assertMayGrantPermissions($actor, $added);
+            $this->assertRoleHoldersWithinTier($actor, $role, [...array_diff($before, $requested), ...$added]);
 
             $role->syncPermissions($permissions);
             $after = $role->permissions()->pluck('name')->sort()->values()->all();
@@ -826,34 +828,35 @@ final readonly class AccessControlService
     /**
      * The target ceiling over the role surface.
      *
-     * A role's permissions are its holders' permissions, so removing one reaches every holder without naming any -
+     * A role's permissions are its holders' permissions, so editing one reaches every holder without naming any -
      * the user-directed mutations pass a target and are checked in mutate(), a role edit has none to pass.
      * Left unguarded, an actor refused by the ceiling on the user endpoints could demote the same account through
-     * the role it holds, and then reach the demoted account for real.
-     * Every holder the removal would demote must therefore sit within the actor's reach, exactly as if the actor
-     * had edited them one by one.
+     * the role it holds (and then reach the demoted account for real), or expand its grants - which also reshapes
+     * whom *other* admins can reach, since tiers compare privileged sets.
+     * Every holder whose privileged composition the edit would change must therefore sit within the actor's reach,
+     * exactly as if the actor had edited them one by one: administrative scope is direction-blind.
      *
-     * Only privileged removals are guarded: they alone move a tier, and holding every role edit to the ceiling would
+     * Only privileged deltas are guarded: they alone move a tier, and holding every role edit to the ceiling would
      * make a role uneditable for everyone below its highest-tier holder - roles are global vocabulary.
      * Super-admin holders are skipped: Gate::before answers for them, so what their roles carry changes nothing about
      * their authority, while treating them as out of reach would privilege-lock every role they happen to hold.
      *
-     * @param  iterable<string>  $removedNames  the permission names leaving the role
+     * @param  iterable<string>  $changedNames  the permission names entering or leaving the role
      */
-    private function assertRoleHoldersWithinTier(User $actor, RoleContract $role, iterable $removedNames): void
+    private function assertRoleHoldersWithinTier(User $actor, RoleContract $role, iterable $changedNames): void
     {
         $privileged = (array) config('access.privileged_permissions', []);
-        $demotes = false;
+        $movesTier = false;
 
-        foreach ($removedNames as $name) {
+        foreach ($changedNames as $name) {
             if (in_array($name, $privileged, true)) {
-                $demotes = true;
+                $movesTier = true;
 
                 break;
             }
         }
 
-        if (!$demotes) {
+        if (!$movesTier) {
             return;
         }
 
@@ -996,6 +999,36 @@ final readonly class AccessControlService
     private function audit(User $actor, string $action, ?Model $subject, ?array $before, ?array $after): void
     {
         $this->auditor->record($actor, $action, $subject, $before, $after);
+    }
+
+    /**
+     * The submitted role ids resolved to models, scoped to the configured guard.
+     *
+     * The guard boundary is enforced here, at the write path, not only in validation (AllExistInGuard): a
+     * caller that never ran the form request still cannot attach a foreign-guard role. Ids outside the guard
+     * drop out of the fetch exactly like unknown ids do.
+     *
+     * @param  list<int>  $roleIds
+     * @return EloquentCollection<int, RoleContract>
+     */
+    private function rolesInGuard(array $roleIds): EloquentCollection
+    {
+        return $this->roleModel()::whereIn('id', $roleIds)
+            ->where('guard_name', config('access.guard'))
+            ->get();
+    }
+
+    /**
+     * The submitted permission ids resolved to models, scoped to the configured guard ({@see rolesInGuard()}).
+     *
+     * @param  list<int>  $permissionIds
+     * @return EloquentCollection<int, PermissionContract>
+     */
+    private function permissionsInGuard(array $permissionIds): EloquentCollection
+    {
+        return $this->permissionModel()::whereIn('id', $permissionIds)
+            ->where('guard_name', config('access.guard'))
+            ->get();
     }
 
     /**

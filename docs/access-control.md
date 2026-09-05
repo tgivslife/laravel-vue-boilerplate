@@ -32,9 +32,10 @@ lockout permission rows, verified against the invariants before commit:
   holders of everything; deactivating, banning or deleting the last holder counts as stripping);
 - **target ceiling** — no mutation may touch an account holding the super-admin role or a privileged permission the
   actor lacks (subset semantics: equal-tier admins keep managing each other; super admins bypass). The ceiling reaches
-  the role surface too: a role edit or deletion that would strip a privileged permission is refused when any holder is
-  out of the actor's reach, so demoting an unreachable account through the role it holds is not a way around it.
-  Only privileged removals are guarded — roles stay global vocabulary — and super-admin holders are skipped, since
+  the role surface too: a role edit or deletion that would change a privileged permission — strip *or* add one — is
+  refused when any holder is out of the actor's reach, so neither demoting an unreachable account through the role it
+  holds nor expanding its grants (which also reshapes whom other admins can reach) is a way around it.
+  Only privileged deltas are guarded — roles stay global vocabulary — and super-admin holders are skipped, since
   `Gate::before` answers for them and what their roles carry changes nothing about their authority;
 - **grant ceiling** — permissions and roles being *added* must sit within what the actor effectively holds (super
   admins hold everything). Removals are exempt, so a grant above the actor's ceiling stays removable, never re-growable.
@@ -86,9 +87,17 @@ into an account, no matter who performed them":
   `user.two_factor_disabled`, `user.identity_linked`, `user.identity_unlinked`,
   `user.self_provisioned`, `user.self_deleted`, `user.password_changed`.
 
-Entries carry actor, subject, before/after and IP, and are viewable per user in the admin UI. The trail holds PII on
-purpose (before-snapshots retain original emails past the tombstone), so it is retention-pruned daily by
-`access:purge-audit-logs`; a non-positive retention keeps entries forever, for deployments that must.
+Entries carry actor, subject, before/after and IP. Two admin surfaces read them: the per-user trail on an account's
+detail page (`users.view`, plus the record scope on the subject), and the role-surface change feed — the whole role
+half of the trail, newest first, optionally narrowed to one role (`roles.view`). Roles hard-delete, so the feed is
+where a deleted role's history survives: entries outlive their subject and render its name from the `role.deleted`
+snapshot. On both surfaces an actor the viewer's record scope does not reach is reduced to a `restricted` marker,
+IP included — nothing partial is emitted, because an email is a login handle, a name confirms a guess, and an
+address correlates entries.
+
+The trail holds PII on purpose (before-snapshots retain original emails past the tombstone), so it is
+retention-pruned daily by `access:purge-audit-logs`; a non-positive retention keeps entries forever, for
+deployments that must.
 
 ## Configuration (`config/access.php`)
 

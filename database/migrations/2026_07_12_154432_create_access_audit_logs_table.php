@@ -8,9 +8,8 @@ return new class extends Migration {
     /**
      * Audit trail of access-control mutations (role/permission/rule changes).
      *
-     * Rows are written in the same transaction as the mutation and carry
-     * scalar before/after snapshots, so the trail survives later deletion of
-     * the actor or subject. Immutable: created_at only.
+     * Rows are written in the same transaction as the mutation and carry scalar before/after snapshots,
+     * so the trail survives later deletion of the actor or subject. Immutable: created_at only.
      */
     public function up(): void
     {
@@ -25,7 +24,10 @@ return new class extends Migration {
             $table->string('ip_address', 45)->nullable();
             $table->timestamp('created_at');
 
+            // The per-user trail: one subject, newest first.
             $table->index(['subject_type', 'subject_id']);
+            // The role-surface change feed: one subject *type*, newest first - a sort the index above cannot serve.
+            $table->index(['subject_type', 'id']);
             $table->index('actor_id');
         });
     }

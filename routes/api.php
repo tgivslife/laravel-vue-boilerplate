@@ -29,6 +29,16 @@ use App\Http\Middleware\EnsureUserCanAuthenticate;
 use App\Http\Middleware\RequireCaptcha;
 use Illuminate\Support\Facades\Route;
 
+/*
+ * Bigint-id params, bounded to 18 digits (the longest always in signed-bigint range). A non-numeric or
+ * over-long segment then 404s at routing instead of overflowing the binding query (a 500 on postgres).
+ * Global so a new {user}/{role}/... route cannot forget it.
+ */
+Route::pattern('user', '[0-9]{1,18}');
+Route::pattern('role', '[0-9]{1,18}');
+Route::pattern('recordId', '[0-9]{1,18}');
+Route::pattern('tokenId', '[0-9]{1,18}');
+
 Route::post('login', [AuthController::class, 'login'])
     ->middleware(['throttle:login', RequireCaptcha::class.':login'])
     ->name('login');
@@ -115,7 +125,6 @@ Route::middleware([
         ->middleware(['throttle:pat-create', EnsureNotImpersonating::class])
         ->name('tokens.store');
     Route::delete('tokens/{tokenId}', [PersonalAccessTokenController::class, 'destroy'])
-        ->whereNumber('tokenId')
         ->middleware(EnsureNotImpersonating::class)
         ->name('tokens.destroy');
 
@@ -170,43 +179,47 @@ Route::middleware([
 
         // Reads resolve tombstoned accounts too - deletion audit entries must stay readable.
         // Mutations (below) deliberately keep 404ing for them: deletion is final.
-        Route::get('users/{user}', [UserAccessController::class, 'show'])->withTrashed()->name('users.show');
-        Route::get('users/{user}/sessions',
-            [UserAccountController::class, 'sessions'])->withTrashed()->name('users.sessions');
-        Route::get('users/{user}/authentication-logs',
-            [UserAccountController::class, 'authenticationLogs'])->withTrashed()->name('users.authentication-logs');
-        Route::get('users/{user}/audit-logs',
-            [UserAccountController::class, 'auditLogs'])->withTrashed()->name('users.audit-logs');
+        Route::get('users/{user}', [UserAccessController::class, 'show'])
+            ->withTrashed()->name('users.show');
+        Route::get('users/{user}/sessions', [UserAccountController::class, 'sessions'])
+            ->withTrashed()->name('users.sessions');
+        Route::get('users/{user}/authentication-logs', [UserAccountController::class, 'authenticationLogs'])
+            ->withTrashed()->name('users.authentication-logs');
+        Route::get('users/{user}/audit-logs', [UserAccountController::class, 'auditLogs'])
+            ->withTrashed()->name('users.audit-logs');
     });
 
     Route::middleware('can:users.manage')->group(function () {
         Route::post('users', [UserAccessController::class, 'store'])->name('users.store');
-        Route::put('users/{user}/roles', [UserAccessController::class, 'syncRoles'])->name('users.roles');
-        Route::put('users/{user}/permissions',
-            [UserAccessController::class, 'syncPermissions'])->name('users.permissions');
+        Route::put('users/{user}/roles', [UserAccessController::class, 'syncRoles'])
+            ->name('users.roles');
+        Route::put('users/{user}/permissions', [UserAccessController::class, 'syncPermissions'])
+            ->name('users.permissions');
 
-        Route::patch('users/{user}', [UserAccountController::class, 'update'])->name('users.update');
-        Route::post('users/{user}/force-password-reset',
-            [UserAccountController::class, 'forcePasswordReset'])->name('users.force-password-reset');
-        Route::post('users/{user}/resend-invitation',
-            [UserAccountController::class, 'resendInvitation'])->name('users.resend-invitation');
-        Route::delete('users/{user}/two-factor',
-            [UserAccountController::class, 'resetTwoFactor'])->name('users.two-factor-reset');
-        Route::delete('users/{user}', [UserAccountController::class, 'destroy'])->name('users.destroy');
+        Route::patch('users/{user}', [UserAccountController::class, 'update'])
+            ->name('users.update');
+        Route::post('users/{user}/force-password-reset', [UserAccountController::class, 'forcePasswordReset'])
+            ->name('users.force-password-reset');
+        Route::post('users/{user}/resend-invitation', [UserAccountController::class, 'resendInvitation'])
+            ->name('users.resend-invitation');
+        Route::delete('users/{user}/two-factor', [UserAccountController::class, 'resetTwoFactor'])
+            ->name('users.two-factor-reset');
+        Route::delete('users/{user}', [UserAccountController::class, 'destroy'])
+            ->name('users.destroy');
     });
 
     Route::middleware('can:users.impersonate')->group(function () {
-        Route::post('users/{user}/impersonate',
-            [ImpersonationController::class, 'store'])->name('users.impersonate');
+        Route::post('users/{user}/impersonate', [ImpersonationController::class, 'store'])
+            ->name('users.impersonate');
     });
 
     Route::middleware('can:roles.view')->group(function () {
         Route::get('roles', [RoleController::class, 'index'])->name('roles.index');
-        // The literal segment must register before the {role} wildcard.
+        // The literal segments must register before the {role} wildcard.
         Route::get('roles/stats', [RoleController::class, 'stats'])->name('roles.stats');
-        // Numeric ids only: the binding compares against a bigint key, so a non-numeric segment would
-        // reach the database and surface as a 500 rather than the 404 an unknown role gives.
-        Route::get('roles/{role}', [RoleController::class, 'show'])->whereNumber('role')->name('roles.show');
+        // The role-surface change feed; deleted roles live on here, so it binds no {role}.
+        Route::get('roles/audit-logs', [RoleController::class, 'auditLogs'])->name('roles.audit-logs');
+        Route::get('roles/{role}', [RoleController::class, 'show'])->name('roles.show');
         Route::get('permissions', [PermissionController::class, 'index'])->name('permissions.index');
         Route::get('permissions/stats', [PermissionController::class, 'stats'])->name('permissions.stats');
     });
@@ -214,11 +227,11 @@ Route::middleware([
     Route::middleware('can:roles.manage')->group(function () {
         Route::post('roles', [RoleController::class, 'store'])->name('roles.store');
         Route::patch('roles/{role}', [RoleController::class, 'update'])
-            ->whereNumber('role')->name('roles.update');
+            ->name('roles.update');
         Route::delete('roles/{role}', [RoleController::class, 'destroy'])
-            ->whereNumber('role')->name('roles.destroy');
+            ->name('roles.destroy');
         Route::put('roles/{role}/permissions', [RoleController::class, 'syncPermissions'])
-            ->whereNumber('role')->name('roles.permissions');
+            ->name('roles.permissions');
 
         Route::get('protectables', [ProtectableController::class, 'index'])->name('protectables.index');
         Route::get('protectables/{alias}/rules',
@@ -228,9 +241,9 @@ Route::middleware([
         Route::get('protectables/{alias}/records',
             [ProtectableController::class, 'records'])->name('protectables.records');
         Route::get('protectables/{alias}/records/{recordId}', [ProtectableController::class, 'recordRules'])
-            ->whereNumber('recordId')->name('protectables.records.rules');
+            ->name('protectables.records.rules');
         Route::put('protectables/{alias}/records/{recordId}', [ProtectableController::class, 'syncRecordRules'])
-            ->whereNumber('recordId')->name('protectables.records.rules.sync');
+            ->name('protectables.records.rules.sync');
     });
 
     Route::middleware('can:settings.manage')->group(function () {

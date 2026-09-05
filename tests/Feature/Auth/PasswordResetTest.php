@@ -95,6 +95,16 @@ class PasswordResetTest extends TestCase
         $this->requestReset('not-an-email')->assertStatus(422);
     }
 
+    public function test_request_with_a_non_scalar_email_is_a_validation_error_not_a_500(): void
+    {
+        // The forgot limiter keys on `email` straight from the unvalidated request; an array value would throw
+        // "Array to string conversion" inside the throttle middleware (a 500 with warnings promoted to exceptions)
+        // before validation could 422 the shape. RateLimitServiceProvider collapses non-scalars to an empty key.
+        $this->withHeader('Referer', config('app.url'))
+            ->postJson('/api/password/forgot', ['email' => ['array@example.com']])
+            ->assertStatus(422);
+    }
+
     public function test_request_is_throttled_per_email_and_ip(): void
     {
         config(['security.password_reset.request_limit.max_attempts' => 2]);

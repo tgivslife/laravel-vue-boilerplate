@@ -3,17 +3,22 @@
 namespace App\Http\Controllers\Access;
 
 use App\Http\Controllers\Controller;
+use App\Http\Requests\Access\RoleAuditLogIndexRequest;
 use App\Http\Requests\Access\RoleIndexRequest;
 use App\Http\Requests\Access\RoleStoreRequest;
 use App\Http\Requests\Access\RoleUpdateRequest;
 use App\Http\Requests\Access\SyncPermissionsRequest;
+use App\Http\Resources\Access\AccessAuditLogResource;
 use App\Http\Resources\Access\AccessRoleResource;
 use App\Http\Responses\JsonSuccessResponse;
+use App\Models\Access\AccessAuditLog;
 use App\Models\User;
 use App\Services\Access\AccessControlService;
 use App\Support\Access\EscapedLikeFilter;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Spatie\Permission\Contracts\Role as RoleContract;
 use Spatie\Permission\Models\Role;
@@ -140,6 +145,93 @@ class RoleController extends Controller
             ->where('is_active', true)
             ->whereNull('banned_at')
             ->count();
+    }
+
+    /**
+     * The role-surface change feed: every audit entry with a role as subject, newest first - creations,
+     * renames, permission syncs and deletions - optionally narrowed to one role with `filter[role_id]`.
+     *
+     * Roles hard-delete (no tombstones), so this feed is the durable record: entries outlive their subject,
+     * and each one carries a `role` block resolved server-side - the live row's current name when it still
+     * exists, the deletion entry's snapshot name otherwise, flagged `deleted`.
+     *
+     * The actor eager load is scoped exactly like the user trail's (UserAccountController::auditLogs()):
+     * an actor outside the viewer's record scope never loads, and the resource reports it `restricted`.
+     */
+    public function auditLogs(RoleAuditLogIndexRequest $request): JsonResponse
+    {
+        // Narrowed on presence, not truthiness: passing the value straight to when() would read a submitted
+        // 0 as "no filter given" and answer an explicitly narrowed request with the whole surface.
+        $roleId = $request->validated('filter.role_id');
+
+        $entries = AccessAuditLog::query()
+            ->where('subject_type', (new Role)->getMorphClass())
+            ->when($roleId !== null, static fn($query) => $query->where('subject_id', (int) $roleId))
+            ->with([
+                'actor' => static function (BelongsTo $actor) use ($request): void {
+                    $actor->visibleTo($request->user())
+                        ->select(['id', 'first_name', 'last_name', 'email', 'deleted_at']);
+                }
+            ])
+            ->orderByDesc('id')
+            ->simplePaginate((int) config('access.audit_log.page_size', 15));
+
+        $roles = $this->subjectRoles(collect($entries->items()));
+
+        return new JsonSuccessResponse(
+            status: Response::HTTP_OK,
+            message: 'Audit log retrieved successfully',
+            data: [
+                'entries' => collect($entries->items())->map(
+                    static fn(AccessAuditLog $entry): array => new AccessAuditLogResource($entry)->resolve($request)
+                        + ['role' => $roles[(int) $entry->subject_id] ?? null],
+                )->all(),
+                'has_more' => $entries->hasMorePages(),
+            ],
+        )->toResponse($request);
+    }
+
+    /**
+     * The subject `role` block for one feed page, resolved in at most two queries: live rows answer with their
+     * current name, gone ids fall back to the name their `role.deleted` entry snapshotted.
+     *
+     * @param  Collection<int, AccessAuditLog>  $entries
+     * @return array<int, array{id: int, name: ?string, deleted: bool}>
+     */
+    private function subjectRoles(Collection $entries): array
+    {
+        $ids = $entries->pluck('subject_id')
+            ->filter()
+            ->map(static fn(mixed $id): int => (int) $id)
+            ->unique()
+            ->values();
+
+        if ($ids->isEmpty()) {
+            return [];
+        }
+
+        $live = Role::query()->whereIn('id', $ids)->pluck('name', 'id')->all();
+
+        $deletedIds = $ids->reject(static fn(int $id): bool => isset($live[$id]))->values();
+
+        // Ordered ascending so, should an id ever repeat, the newest deletion's snapshot wins the key.
+        $deletedNames = $deletedIds->isEmpty() ? collect() : AccessAuditLog::query()
+            ->where('subject_type', (new Role)->getMorphClass())
+            ->whereIn('subject_id', $deletedIds)
+            ->where('action', 'role.deleted')
+            ->orderBy('id')
+            ->get(['subject_id', 'before'])
+            ->mapWithKeys(static fn(AccessAuditLog $entry): array => [
+                (int) $entry->subject_id => $entry->before['name'] ?? null,
+            ]);
+
+        return $ids->mapWithKeys(static fn(int $id): array => [
+            $id => [
+                'id' => $id,
+                'name' => $live[$id] ?? $deletedNames[$id] ?? null,
+                'deleted' => !isset($live[$id]),
+            ],
+        ])->all();
     }
 
     /**

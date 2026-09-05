@@ -102,6 +102,25 @@ class MagicLinkTest extends TestCase
         $this->requestLink('not-an-email')->assertStatus(422);
     }
 
+    public function test_request_with_a_non_scalar_email_is_a_validation_error_not_a_500(): void
+    {
+        // The throttle limiter keys on `email` straight from the unvalidated request; a bare (string) cast on an
+        // array value throws "Array to string conversion" inside the middleware - and with warnings promoted to
+        // exceptions, that is a 500 before the form request can answer the shape with a 422. RateLimitServiceProvider
+        // now collapses non-scalars to an empty key, so validation gets to run.
+        $this->withHeader('Referer', config('app.url'))
+            ->postJson('/api/magic-link', ['email' => ['array@example.com']])
+            ->assertStatus(422);
+    }
+
+    public function test_consume_with_a_non_scalar_token_is_a_validation_error_not_a_500(): void
+    {
+        // The consume limiter hashes `token` from the unvalidated request - the same array-to-string 500 vector.
+        $this->withHeader('Referer', config('app.url'))
+            ->postJson('/api/magic-link/consume', ['token' => ['a', 'b']])
+            ->assertStatus(422);
+    }
+
     public function test_request_is_throttled_per_email_and_ip(): void
     {
         config(['security.magic_link.request_limit.max_attempts' => 2]);

@@ -678,7 +678,27 @@
             "available_permissions": "Permisiuni disponibile",
             "assigned_permissions": "Permisiuni atribuite",
             "save_permissions": "Salvează permisiunile",
-            "reset_changes": "Resetează"
+            "reset_changes": "Resetează",
+            "audit": {
+                "tab": "Istoric",
+                "description": "Fiecare modificare de rol, cele mai noi primele — creări, redenumiri, editări de permisiuni și ștergeri. Rolurile șterse rămân înregistrate aici.",
+                "empty": "Nicio modificare de rol înregistrată încă.",
+                "load_more": "Încarcă mai multe",
+                "loading_failed": "Jurnalul de audit nu a putut fi încărcat.",
+                "by": "de {name}",
+                "actor_deleted": "un admin șters",
+                "actor_restricted": "un admin restricționat",
+                "deleted_badge": "Șters",
+                "col_field": "Câmp",
+                "col_before": "Înainte",
+                "col_after": "După",
+                "actions": {
+                    "role_created": "Rol creat",
+                    "role_renamed": "Rol redenumit",
+                    "role_permissions_synced": "Permisiuni modificate",
+                    "role_deleted": "Rol șters"
+                }
+            }
         }
     }
 }

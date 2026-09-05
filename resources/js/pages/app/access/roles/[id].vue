@@ -58,6 +58,7 @@ function applyRole (freshRole) {
 const tabItems = computed(() => [
     { label: t('messages.access.roles.tab_profile'), icon: 'i-tabler-id', slot: 'profile' },
     { label: t('messages.access.roles.permissions'), icon: 'i-tabler-key', slot: 'permissions' },
+    { label: t('messages.access.roles.audit.tab'), icon: 'i-tabler-history', slot: 'audit' },
 ])
 
 async function loadRole () {
@@ -436,6 +437,10 @@ async function savePermissions () {
                                 <span v-else class="text-sm text-muted">—</span>
                             </div>
                         </AccessSection>
+                    </template>
+
+                    <template #audit>
+                        <AccessRoleAuditLog :role-id="role.id" class="mt-4"/>
                     </template>
                 </UTabs>
             </div>

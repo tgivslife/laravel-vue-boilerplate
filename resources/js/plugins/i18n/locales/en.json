@@ -678,7 +678,27 @@
             "available_permissions": "Available permissions",
             "assigned_permissions": "Assigned permissions",
             "save_permissions": "Save permissions",
-            "reset_changes": "Reset"
+            "reset_changes": "Reset",
+            "audit": {
+                "tab": "History",
+                "description": "Every role change, newest first — creations, renames, permission edits and deletions. Deleted roles stay on record here.",
+                "empty": "No role changes recorded yet.",
+                "load_more": "Load more",
+                "loading_failed": "The audit log could not be loaded.",
+                "by": "by {name}",
+                "actor_deleted": "a deleted admin",
+                "actor_restricted": "a restricted admin",
+                "deleted_badge": "Deleted",
+                "col_field": "Field",
+                "col_before": "Before",
+                "col_after": "After",
+                "actions": {
+                    "role_created": "Role created",
+                    "role_renamed": "Role renamed",
+                    "role_permissions_synced": "Permissions changed",
+                    "role_deleted": "Role deleted"
+                }
+            }
         }
     }
 }

@@ -706,9 +706,10 @@ class AccessAdminApiTest extends AccessTestCase
     public function test_integer_like_id_spellings_cannot_dodge_the_existence_check(): void
     {
         /*
-         * Ids must be native JSON integers: `integer:strict` refuses every other spelling as a shape error,
-         * and AllExistInGuard normalizes with FILTER_VALIDATE_INT so nothing can slip between the two rules -
-         * plain `integer` used to accept 42.0 and '+42', which the existence check then skipped unchecked.
+         * Ids must be native JSON integers: `integer:strict` refuses every other spelling as a shape error
+         * (plain `integer` used to accept 42.0 and '+42', which the existence check then skipped unchecked).
+         * AllExistInGuard answers existence for well-shaped arrays only; the service's guard-scoped fetches
+         * (rolesInGuard/permissionsInGuard) are what keep a foreign-guard id unattachable regardless.
          */
         $this->actingAsManager();
         $target = $this->createUser();
@@ -957,13 +958,14 @@ class AccessAdminApiTest extends AccessTestCase
     public function test_a_non_numeric_role_id_is_a_404_not_a_database_error(): void
     {
         /*
-         * Without whereNumber('role') the segment reaches the binding's key comparison, which on postgres is a
-         * bigint: "invalid input syntax for type bigint", rendered as a 500.
+         * Without the {role} route constraint (Route::pattern in api.php) the segment reaches the binding's key
+         * comparison, which on postgres is a bigint: "invalid input syntax for type bigint", rendered as a 500.
          *
          * This test cannot demonstrate that, and says so rather than implying otherwise: the suite runs on sqlite,
          * which is loosely typed and simply matches nothing, so these assertions pass with or without the
-         * constraint. It is here to pin the intended 404 contract and to fail if a `{role}` route is ever added
-         * without the constraint AND the suite is pointed at postgres.
+         * constraint. It is here to pin the intended 404 contract; the over-long-id case (which the constraint
+         * rejects at routing regardless of driver) is proven DB-independently in
+         * test_an_overlong_numeric_id_is_rejected_at_routing.
          */
         $this->actingAsManager();
 
@@ -974,6 +976,70 @@ class AccessAdminApiTest extends AccessTestCase
 
         // The literal segment still wins over the wildcard.
         $this->getJson('/api/access/roles/stats')->assertOk();
+    }
+
+    public function test_a_non_numeric_user_id_is_a_404_not_a_database_error(): void
+    {
+        /*
+         * The same bigint-binding contract as the role surface, and the same sqlite caveat: these assertions
+         * pass with or without the {user} route constraint on this suite's connection. They pin the 404 for every
+         * `{user}` route - the wildcard spans three capability groups, so the global Route::pattern in api.php
+         * constrains them once rather than per route, where a new one is easy to add unconstrained.
+         *
+         * Note the reach: SubstituteBindings runs after auth:sanctum but before the `can:` gate, so on postgres
+         * an unconstrained segment is a 500 for any signed-in account, admin or not.
+         */
+        $this->actingAsManager();
+
+        $this->getJson('/api/access/users/abc')->assertStatus(404);
+        $this->getJson('/api/access/users/abc/sessions')->assertStatus(404);
+        $this->getJson('/api/access/users/abc/authentication-logs')->assertStatus(404);
+        $this->getJson('/api/access/users/abc/audit-logs')->assertStatus(404);
+
+        $this->putJson('/api/access/users/abc/roles', ['role_ids' => []])->assertStatus(404);
+        $this->putJson('/api/access/users/abc/permissions', ['permission_ids' => []])->assertStatus(404);
+        $this->patchJson('/api/access/users/abc', ['first_name' => 'Nobody'])->assertStatus(404);
+        $this->postJson('/api/access/users/abc/force-password-reset')->assertStatus(404);
+        $this->postJson('/api/access/users/abc/resend-invitation')->assertStatus(404);
+        $this->deleteJson('/api/access/users/abc/two-factor')->assertStatus(404);
+        $this->deleteJson('/api/access/users/abc')->assertStatus(404);
+        $this->postJson('/api/access/users/abc/impersonate')->assertStatus(404);
+
+        // The literal segments still win over the wildcard.
+        $this->getJson('/api/access/users/stats')->assertOk();
+        $this->getJson('/api/access/users/membership?email=nobody@example.com')->assertOk();
+    }
+
+    public function test_an_overlong_numeric_id_is_rejected_at_routing(): void
+    {
+        /*
+         * A numeric id that overflows a signed bigint (postgres: "value out of range for type bigint") would 500
+         * from the binding query - the case whereNumber's unbounded [0-9]+ never covered. The Route::pattern bound
+         * ([0-9]{1,18}) rejects it at the routing layer instead.
+         *
+         * Proven DB-independently, so it holds on this suite's sqlite: routing runs before middleware, so a segment
+         * the pattern rejects matches no route and 404s, while an in-range id matches and is stopped by auth
+         * (401, unauthenticated). The 401-vs-404 split is the constraint doing its job; a 500 would need postgres.
+         */
+        $overlong = str_repeat('9', 30);
+
+        // In-range ids match the route and reach auth - the baseline the rejection is measured against.
+        $this->getJson('/api/access/roles/5')->assertStatus(401);
+        $this->getJson('/api/access/users/5')->assertStatus(401);
+        $this->getJson('/api/access/users/5/audit-logs')->assertStatus(401);
+        $this->getJson('/api/access/protectables/widget/records/5')->assertStatus(401);
+        $this->deleteJson('/api/tokens/5')->assertStatus(401);
+
+        // Over-long ids never match a route: the pattern rejects them before auth ever runs.
+        $this->getJson("/api/access/roles/{$overlong}")->assertStatus(404);
+        $this->patchJson("/api/access/roles/{$overlong}", ['name' => 'x'])->assertStatus(404);
+        $this->getJson("/api/access/users/{$overlong}")->assertStatus(404);
+        $this->getJson("/api/access/users/{$overlong}/audit-logs")->assertStatus(404);
+        $this->getJson("/api/access/protectables/widget/records/{$overlong}")->assertStatus(404);
+        $this->deleteJson("/api/tokens/{$overlong}")->assertStatus(404);
+
+        // The longest in-range length (18 digits) still matches - the bound is not off by one.
+        $this->getJson('/api/access/roles/'.str_repeat('9', 18))->assertStatus(401);
     }
 
     public function test_protectables_are_listed_from_the_whitelist(): void

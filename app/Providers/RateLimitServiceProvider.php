@@ -18,6 +18,22 @@ class RateLimitServiceProvider extends ServiceProvider
     }
 
     /**
+     * A request field coerced to a string for use as a rate-limit key, before validation has run.
+     *
+     * The limiters key on `email` / `token` straight from the unvalidated request, so the field can be any JSON
+     * shape a caller sends. A bare `(string)` cast throws "Array to string conversion" on an array value, and with
+     * warnings promoted to exceptions that surfaces as a 500 from inside the throttle middleware - before the form
+     * request could answer the malformed shape with a 422. Non-scalars collapse to an empty key instead; scalars
+     * keep the exact string the cast produced.
+     */
+    private static function stringInput(Request $request, string $key): string
+    {
+        $value = $request->input($key);
+
+        return is_scalar($value) ? (string) $value : '';
+    }
+
+    /**
      * Bootstrap services.
      */
     public function boot(): void
@@ -41,7 +57,7 @@ class RateLimitServiceProvider extends ServiceProvider
          * Counts every request, not just failures: sending email is the cost, so volume itself is the abuse vector.
          */
         RateLimiter::for('magic-link-request', static function (Request $request) {
-            $email = mb_strtolower(trim((string) $request->input('email')));
+            $email = mb_strtolower(trim(self::stringInput($request, 'email')));
             $max = (int) config('security.magic_link.request_limit.max_attempts', 5);
             $decay = (int) config('security.magic_link.request_limit.decay_minutes', 15);
 
@@ -56,7 +72,7 @@ class RateLimitServiceProvider extends ServiceProvider
          * volume itself is the abuse vector, counted per target address and per caller IP.
          */
         RateLimiter::for('password-reset-request', static function (Request $request) {
-            $email = mb_strtolower(trim((string) $request->input('email')));
+            $email = mb_strtolower(trim(self::stringInput($request, 'email')));
             $max = (int) config('security.password_reset.request_limit.max_attempts', 5);
             $decay = (int) config('security.password_reset.request_limit.decay_minutes', 15);
 
@@ -119,7 +135,7 @@ class RateLimitServiceProvider extends ServiceProvider
             return [
                 Limit::perMinutes($decay, $max)->by('magic-link:consume:ip:'.$request->ip()),
                 Limit::perMinutes($decay, $max)->by('magic-link:consume:token:'.hash('sha256',
-                        (string) $request->input('token'))),
+                        self::stringInput($request, 'token'))),
             ];
         });
     }

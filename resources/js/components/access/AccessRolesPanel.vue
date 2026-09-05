@@ -290,6 +290,15 @@ async function deleteRole () {
             </UInput>
 
             <div class="ms-auto flex items-center gap-2">
+                <!-- The change feed lives on its own page: it is also where deleted roles' history survives. -->
+                <UButton
+                    :label="t('messages.access.roles.audit.tab')"
+                    icon="i-tabler-history"
+                    color="neutral"
+                    variant="outline"
+                    to="/app/access/roles/history"
+                />
+
                 <UDropdownMenu
                     :items="columnVisibilityItems"
                     :content="{ align: 'end' }"

@@ -1,23 +1,29 @@
 <?php
 
-namespace Database\Seeders;
+namespace Database\Seeders\Dev;
 
 use App\Models\MagicLinkToken;
 use App\Models\User;
 use App\Services\Access\AccountRetirementService;
 use App\Services\Auth\MagicLinkTokenHasher;
 use Illuminate\Database\Seeder;
+use RuntimeException;
 use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Manual-testing fixture: one account per rung of the tier ladder, plus one per account state the app gates on.
  *
- * Deliberately NOT called from DatabaseSeeder - this is throwaway data for a development database, run explicitly:
+ * Lives in the Dev sub-namespace, away from the production seeders, and is deliberately NOT called from
+ * DatabaseSeeder - this is throwaway data for a development database, run explicitly (quoted, so the shell
+ * leaves the backslashes alone):
  *
- *   php artisan db:seed --class=SampleDataSeeder
+ *   php artisan db:seed --class="Database\Seeders\Dev\SampleDataSeeder"
  *
  * Idempotent, so a reseed refreshes the fixture instead of colliding on the unique email index.
  * Requires PermissionSeeder and RoleSeeder to have run (the vocabulary, and the super-admin/admin roles).
+ *
+ * Refuses to run in production: every account shares a published password and the invitation token is a fixed
+ * string, so on a live database this would mint sign-in-able credentials for anyone who has read this file.
  */
 class SampleDataSeeder extends Seeder
 {
@@ -40,6 +46,12 @@ class SampleDataSeeder extends Seeder
 
     public function run(): void
     {
+        // A hard throw rather than a quiet skip: buried in a deploy script's seeder chain, a printed
+        // warning scrolls past - a failed command does not.
+        if (app()->isProduction()) {
+            throw new RuntimeException('SampleDataSeeder is a development fixture and must never run in production.');
+        }
+
         app(PermissionRegistrar::class)->forgetCachedPermissions();
 
         $this->seedRoles();

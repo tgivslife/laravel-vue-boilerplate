@@ -3,6 +3,7 @@
 namespace Tests\Feature\Access;
 
 use App\Models\User;
+use App\Services\Access\AccessControlService;
 use Illuminate\Support\Facades\Hash;
 
 /**
@@ -102,12 +103,14 @@ class AccessEscalationTest extends AccessTestCase
 
         // users.manage stays in the payload: only the three additions are above the ceiling,
         // and keeping the held grant means the self-revocation guard has nothing to say.
-        $this->putJson("/api/access/users/{$admin->id}/permissions", ['permission_ids' => [
-            $this->permission('users.manage')->getKey(),
-            $this->permission('settings.manage')->getKey(),
-            $this->permission('roles.manage')->getKey(),
-            $this->permission('users.impersonate')->getKey(),
-        ]])
+        $this->putJson("/api/access/users/{$admin->id}/permissions", [
+            'permission_ids' => [
+                $this->permission('users.manage')->getKey(),
+                $this->permission('settings.manage')->getKey(),
+                $this->permission('roles.manage')->getKey(),
+                $this->permission('users.impersonate')->getKey(),
+            ]
+        ])
             ->assertStatus(422)
             ->assertJsonPath('errors.0.detail', __('api.access.grant_above_ceiling'));
 
@@ -136,11 +139,13 @@ class AccessEscalationTest extends AccessTestCase
         $admin->assignRole($ops);
         $this->actingAsStateful($admin);
 
-        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", ['permission_ids' => [
-            $this->permission('roles.manage')->getKey(),
-            $this->permission('settings.manage')->getKey(),
-            $this->permission('users.manage')->getKey(),
-        ]])
+        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", [
+            'permission_ids' => [
+                $this->permission('roles.manage')->getKey(),
+                $this->permission('settings.manage')->getKey(),
+                $this->permission('users.manage')->getKey(),
+            ]
+        ])
             ->assertStatus(422)
             ->assertJsonPath('errors.0.detail', __('api.access.grant_above_ceiling'));
 
@@ -192,9 +197,48 @@ class AccessEscalationTest extends AccessTestCase
         $this->assertTrue($target->fresh()->can('settings.manage'));
     }
 
+    public function test_a_role_edit_cannot_expand_an_out_of_reach_holders_grants(): void
+    {
+        /*
+         * The ceiling is direction-blind over privileged deltas: adding a privileged permission to a role
+         * changes the tier composition of every holder - and reshapes whom other admins can reach - so an
+         * out-of-reach holder's grants may not be expanded any more than they may be stripped.
+         */
+        $this->actingAsHolderOf('users.manage', 'roles.manage', 'widgets.a');
+
+        $ops = config('permission.models.role')::findOrCreate('ops', config('access.guard'));
+        $ops->givePermissionTo('settings.manage');
+
+        $target = $this->createUser();
+        $target->assignRole($ops);
+
+        // No removal at all - settings.manage stays put - yet the privileged addition reaches the
+        // out-of-reach holder and is refused, even though the actor holds users.manage itself.
+        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", [
+            'permission_ids' => [
+                $this->permission('settings.manage')->getKey(),
+                $this->permission('users.manage')->getKey(),
+            ]
+        ])
+            ->assertStatus(422)
+            ->assertJsonPath('errors.0.detail', __('api.access.role_holder_above_tier'));
+
+        $this->assertFalse($target->fresh()->can('users.manage'));
+
+        // A non-privileged addition moves no tier, so ordinary vocabulary growth still lands.
+        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", [
+            'permission_ids' => [
+                $this->permission('settings.manage')->getKey(),
+                $this->permission('widgets.a')->getKey(),
+            ]
+        ])->assertOk();
+
+        $this->assertTrue($target->fresh()->can('widgets.a'));
+    }
+
     public function test_a_role_edit_still_reaches_holders_within_the_actors_tier(): void
     {
-        // The guard is scoped to the removals that move a tier, so ordinary role curation is untouched:
+        // The guard is scoped to the privileged deltas that move a tier, so ordinary role curation is untouched:
         // an equal-tier holder stays reachable, and a non-privileged grant leaves without a ceiling check.
         $this->actingAsHolderOf('users.manage', 'roles.manage');
 
@@ -205,9 +249,11 @@ class AccessEscalationTest extends AccessTestCase
         $peer->assignRole($ops);
 
         // A privileged removal from a peer: subset semantics, so the peer never outranked the actor.
-        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", ['permission_ids' => [
-            $this->permission('widgets.a')->getKey(),
-        ]])->assertOk();
+        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", [
+            'permission_ids' => [
+                $this->permission('widgets.a')->getKey(),
+            ]
+        ])->assertOk();
 
         $this->assertFalse($peer->fresh()->can('users.manage'));
 
@@ -332,9 +378,11 @@ class AccessEscalationTest extends AccessTestCase
         $this->actingAsStateful($this->superAdmin());
         $target = $this->createUser();
 
-        $this->putJson("/api/access/users/{$target->id}/permissions", ['permission_ids' => [
-            $this->permission('settings.manage')->getKey(),
-        ]])->assertOk();
+        $this->putJson("/api/access/users/{$target->id}/permissions", [
+            'permission_ids' => [
+                $this->permission('settings.manage')->getKey(),
+            ]
+        ])->assertOk();
 
         $this->assertTrue($target->fresh()->hasDirectPermission('settings.manage'));
     }
@@ -346,12 +394,39 @@ class AccessEscalationTest extends AccessTestCase
         $this->actingAsHolderOf('users.manage');
         $target = $this->userWithPermissions('widgets.special', 'widgets.a');
 
-        $this->putJson("/api/access/users/{$target->id}/permissions", ['permission_ids' => [
-            $this->permission('widgets.special')->getKey(),
-        ]])->assertOk();
+        $this->putJson("/api/access/users/{$target->id}/permissions", [
+            'permission_ids' => [
+                $this->permission('widgets.special')->getKey(),
+            ]
+        ])->assertOk();
 
         $fresh = $target->fresh();
         $this->assertTrue($fresh->hasDirectPermission('widgets.special'));
         $this->assertFalse($fresh->hasDirectPermission('widgets.a'));
+    }
+
+    public function test_a_foreign_guard_grant_cannot_be_attached_even_through_the_service(): void
+    {
+        /*
+         * Validation (AllExistInGuard) already 422s a foreign-guard id at the API; this pins the write path's
+         * own guard scoping (rolesInGuard/permissionsInGuard), so an internal caller that never ran the form
+         * request still cannot attach a grant from another guard. Foreign ids drop out exactly like unknown ids.
+         */
+        $actor = $this->userWithPermissions('users.manage');
+        $target = $this->createUser();
+
+        $editors = config('permission.models.role')::findOrCreate('editors', config('access.guard'));
+        $foreignRole = config('permission.models.role')::create(['name' => 'foreign', 'guard_name' => 'other-guard']);
+        $foreignPermission = config('permission.models.permission')::create([
+            'name' => 'foreign.manage', 'guard_name' => 'other-guard',
+        ]);
+
+        $service = app(AccessControlService::class);
+        $service->syncUserRoles($actor, $target, [$editors->getKey(), $foreignRole->getKey()]);
+        $service->syncUserPermissions($actor, $target, [$foreignPermission->getKey()]);
+
+        $fresh = $target->fresh();
+        $this->assertSame(['editors'], $fresh->roles()->pluck('name')->all());
+        $this->assertSame([], $fresh->permissions()->pluck('name')->all());
     }
 }

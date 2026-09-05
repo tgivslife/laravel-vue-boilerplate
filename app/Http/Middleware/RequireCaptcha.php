@@ -35,7 +35,9 @@ readonly class RequireCaptcha
             return $next($request);
         }
 
-        $token = (string) $request->input('captcha_token', '');
+        // Read before validation: a non-string (array) would crash a bare (string) cast, so treat it as no token.
+        $submitted = $request->input('captcha_token', '');
+        $token = is_string($submitted) ? $submitted : '';
 
         if ($token === '' || !$this->verifier->verify($token, $request->ip())) {
             return new JsonErrorResponse(

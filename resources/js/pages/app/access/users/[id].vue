@@ -65,13 +65,14 @@ const selectedRoleIds = ref([])
 const selectedPermissionIds = ref([])
 
 function applyUser (freshUser) {
-    user.value = freshUser
     firstName.value = freshUser.first_name ?? ''
     lastName.value = freshUser.last_name ?? ''
     applyGrants(freshUser)
 }
 
-/* The grant half on its own: the access editor must not reach into the profile tab's inputs, so a pending rename survives cancelling (or failing) a grant edit. */
+/* The grant half on its own: the access editor must not reach into the profile tab's inputs, so a pending
+ * rename survives cancelling (or failing) a grant edit. Owns advancing user.value - it is also called
+ * standalone with the server's latest snapshot, and applyUser() delegates the assignment here. */
 function applyGrants (freshUser) {
     user.value = freshUser
     selectedRoleIds.value = freshUser.roles.map(role => role.id)
@@ -84,8 +85,7 @@ const protectedRoleNames = computed(() => roles.value.filter(role => role.protec
 /* Grants above the signed-in admin's own ceiling: the server refuses adding them, so the picker locks them for adding (they stay removable).
  * The protected check runs first - the super-admin role carries no attached permissions and would otherwise read as grantable. */
 const ungrantableRoleNames = computed(() => roles.value.filter(
-    role => !role.protected && (role.permissions ?? []).some(permission => !can(permission.name))).
-    map(role => role.name))
+    role => !role.protected && (role.permissions ?? []).some(permission => !can(permission.name))).map(role => role.name))
 
 const ungrantablePermissionNames = computed(
     () => permissions.value.filter(permission => !can(permission.name)).map(permission => permission.name))

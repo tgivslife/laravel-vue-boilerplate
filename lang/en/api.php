@@ -276,7 +276,7 @@ return [
         'impersonation_target_ineligible' => 'This account cannot be signed in to.',
         'impersonation_above_tier' => 'Impersonating an access administrator requires the super admin tier.',
         'target_above_tier' => 'Managing this account requires privileges it holds and you do not.',
-        'role_holder_above_tier' => 'This role is held by an account outside your reach, so the privileged permissions it grants cannot be removed.',
+        'role_holder_above_tier' => 'This role is held by an account outside your reach, so the privileged permissions it grants cannot be changed.',
         'grant_above_ceiling' => 'You can only grant permissions you hold yourself.',
         'impersonation_not_active' => 'No impersonation is active on this session.',
         'impersonation_blocked' => 'This action is not available while impersonating a user.',
