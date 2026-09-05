@@ -4,8 +4,9 @@ import { useAuthStore } from '@/stores/AuthStore.js'
 import SettingsService from '@/services/SettingsService.js'
 import { useCopyText } from '@/composables/useCopyText.js'
 import { identityTerms, usePasswordSchema } from '@/composables/usePasswordSchema.js'
+import { formatDate } from '@/utils/datetime.js'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const toast = useAppToast()
 const authStore = useAuthStore()
 
@@ -215,7 +216,7 @@ async function unlink () {
 }
 
 function formatIdentityDate (iso) {
-    return iso ? new Date(iso).toLocaleDateString(locale.value) : null
+    return formatDate(iso)
 }
 
 /* ------------------------------------------------------------------ *

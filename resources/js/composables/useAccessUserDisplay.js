@@ -1,25 +1,18 @@
 /**
  * Shared presentation helpers for admin user views (list + detail page).
  */
+import { formatDate, formatDateTime } from '@/utils/datetime.js'
+
 export function useAccessUserDisplay () {
-    const { t, locale } = useI18n()
+    const { t } = useI18n()
 
     function fullName (user) {
         return [user.first_name, user.last_name].filter(Boolean).join(' ') || user.email
     }
 
-    function formatDateTime (iso) {
-        return iso ? new Date(iso).toLocaleString(locale.value) : null
-    }
-
-    function formatDate (iso) {
-        return iso ? new Date(iso).toLocaleDateString(locale.value, { dateStyle: 'medium' }) : null
-    }
-
     /**
-     * Deleted wins over everything (a tombstoned account has no other state that matters),
-     * then banned over inactive: a banned account cannot sign in regardless of its active
-     * flag, mirroring User::canAuthenticate().
+     * Deleted wins over everything (a tombstoned account has no other state that matters), then banned over inactive:
+     * a banned account cannot sign in regardless of its active flag, mirroring User::canAuthenticate().
      */
     function statusOf (user) {
         if (user.deleted_at) {

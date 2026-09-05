@@ -1,5 +1,6 @@
 <script setup>
 import AccessService from '@/services/AccessService.js'
+import { formatDate, formatDateTime } from '@/utils/datetime.js'
 
 /**
  * Read-only admin view of a user's authentication history - the
@@ -10,7 +11,7 @@ const props = defineProps({
     userId: { type: [Number, String], required: true },
 })
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const accessService = new AccessService()
 
@@ -55,8 +56,8 @@ onMounted(() => load())
 
 watch(filterDate, () => load())
 
-function formatDate (iso) {
-    return iso ? new Date(iso).toLocaleString(locale.value) : '-'
+function formatTimestamp (iso) {
+    return formatDateTime(iso) ?? '-'
 }
 
 /*
@@ -75,8 +76,7 @@ function methodLabel (entry) {
  * new Date('YYYY-MM-DD') is UTC midnight, which formats as the previous day in negative-offset timezones.
  */
 function formatFilterDate (calendarDate) {
-    return new Date(calendarDate.year, calendarDate.month - 1, calendarDate.day)
-        .toLocaleDateString(locale.value, { dateStyle: 'medium' })
+    return formatDate(new Date(calendarDate.year, calendarDate.month - 1, calendarDate.day))
 }
 </script>
 
@@ -99,15 +99,19 @@ function formatFilterDate (calendarDate) {
                 </template>
             </UPopover>
 
-            <UButton
+            <UTooltip
                 v-if="filterDate"
-                icon="i-tabler-x"
-                color="neutral"
-                variant="ghost"
-                size="sm"
-                :aria-label="t('messages.settings.authentication_log.clear_filter')"
-                @click="filterDate = null"
-            />
+                :text="t('messages.settings.authentication_log.clear_filter')"
+            >
+                <UButton
+                    icon="i-tabler-x"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    :aria-label="t('messages.settings.authentication_log.clear_filter')"
+                    @click="filterDate = null"
+                />
+            </UTooltip>
         </div>
 
         <ListSkeleton v-if="loading" :rows="4"/>
@@ -153,7 +157,7 @@ function formatFilterDate (calendarDate) {
                     </div>
 
                     <div class="flex flex-col items-end gap-1 shrink-0 text-right">
-                        <span class="text-xs text-muted">{{ formatDate(entry.login_at) }}</span>
+                        <span class="text-xs text-muted">{{ formatTimestamp(entry.login_at) }}</span>
                         <div class="flex items-center gap-1">
                             <UBadge
                                 v-if="methodLabel(entry)"

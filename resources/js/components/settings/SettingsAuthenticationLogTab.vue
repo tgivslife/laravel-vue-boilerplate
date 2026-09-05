@@ -1,7 +1,8 @@
 <script setup>
 import SettingsService from '@/services/SettingsService.js'
+import { formatDate, formatDateTime } from '@/utils/datetime.js'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const settingsService = new SettingsService()
 
@@ -42,13 +43,12 @@ onMounted(() => load())
 
 watch(filterDate, () => load())
 
-function formatDate (iso) {
-    return iso ? new Date(iso).toLocaleString(locale.value) : '-'
+function formatTimestamp (iso) {
+    return formatDateTime(iso) ?? '-'
 }
 
 /*
- * Legacy rows and recaller re-logins carry no method; unknown values
- * (e.g. from a newer backend) simply render no badge.
+ * Legacy rows and recaller re-logins carry no method; unknown values (e.g. from a newer backend) simply render no badge.
  */
 const knownMethods = ['password', 'magic_link', 'invitation', 'roeid', 'id']
 
@@ -60,12 +60,10 @@ function methodLabel (entry) {
 
 /*
  * Built from the calendar's date parts instead of parsing the ISO string:
- * new Date('YYYY-MM-DD') is UTC midnight, which formats as the previous
- * day in negative-offset timezones.
+ * new Date('YYYY-MM-DD') is UTC midnight, which formats as the previous day in negative-offset timezones.
  */
 function formatFilterDate (calendarDate) {
-    return new Date(calendarDate.year, calendarDate.month - 1, calendarDate.day)
-        .toLocaleDateString(locale.value, { dateStyle: 'medium' })
+    return formatDate(new Date(calendarDate.year, calendarDate.month - 1, calendarDate.day))
 }
 </script>
 
@@ -96,15 +94,19 @@ function formatFilterDate (calendarDate) {
                         </template>
                     </UPopover>
 
-                    <UButton
+                    <UTooltip
                         v-if="filterDate"
-                        icon="i-tabler-x"
-                        color="neutral"
-                        variant="ghost"
-                        size="sm"
-                        :aria-label="t('messages.settings.authentication_log.clear_filter')"
-                        @click="filterDate = null"
-                    />
+                        :text="t('messages.settings.authentication_log.clear_filter')"
+                    >
+                        <UButton
+                            icon="i-tabler-x"
+                            color="neutral"
+                            variant="ghost"
+                            size="sm"
+                            :aria-label="t('messages.settings.authentication_log.clear_filter')"
+                            @click="filterDate = null"
+                        />
+                    </UTooltip>
                 </div>
             </div>
         </template>
@@ -152,7 +154,7 @@ function formatFilterDate (calendarDate) {
                     </div>
 
                     <div class="flex flex-col items-end gap-1 shrink-0 text-right">
-                        <span class="text-xs text-muted">{{ formatDate(entry.login_at) }}</span>
+                        <span class="text-xs text-muted">{{ formatTimestamp(entry.login_at) }}</span>
                         <div class="flex items-center gap-1">
                             <UBadge
                                 v-if="methodLabel(entry)"

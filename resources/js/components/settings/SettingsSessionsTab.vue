@@ -1,8 +1,9 @@
 <script setup>
 import { useAuthStore } from '@/stores/AuthStore.js'
 import SettingsService from '@/services/SettingsService.js'
+import { formatDateTime } from '@/utils/datetime.js'
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 const toast = useAppToast()
 const authStore = useAuthStore()
 
@@ -39,7 +40,7 @@ function deviceIcon (session) {
 }
 
 function formatLastActivity (iso) {
-    return new Date(iso).toLocaleString(locale.value)
+    return formatDateTime(iso)
 }
 
 const expandedIds = ref(new Set())

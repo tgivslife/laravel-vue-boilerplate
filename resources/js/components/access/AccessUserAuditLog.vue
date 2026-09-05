@@ -12,8 +12,8 @@ const props = defineProps({
     userId: { type: [Number, String], required: true },
 })
 
-const { t, locale } = useI18n()
-const { fullName } = useAccessUserDisplay()
+const { t } = useI18n()
+const { fullName, formatDateTime } = useAccessUserDisplay()
 
 const accessService = new AccessService()
 
@@ -49,8 +49,8 @@ async function load (nextPage = 1) {
 
 onMounted(() => load())
 
-function formatDate (iso) {
-    return iso ? new Date(iso).toLocaleString(locale.value) : '-'
+function formatTimestamp (iso) {
+    return formatDateTime(iso) ?? '-'
 }
 
 /* Violet is the impersonation accent (see the sidebar user zone and the impersonate actions). */
@@ -144,7 +144,7 @@ function isListChange (change) {
 const timelineItems = computed(() => entries.value.map(entry => ({
     ...entry,
     icon: actionIcon(entry),
-    date: formatDate(entry.created_at),
+    date: formatTimestamp(entry.created_at),
     ...(actionMeta[entry.action]?.accent
         ? { ui: { indicator: actionMeta[entry.action].accent, title: actionMeta[entry.action].accent } }
         : {}),

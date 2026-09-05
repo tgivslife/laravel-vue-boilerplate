@@ -1,5 +1,6 @@
 <script setup>
 import AccessService from '@/services/AccessService.js'
+import { formatDateTime } from '@/utils/datetime.js'
 
 /**
  * Read-only admin view of a user's live sessions - the counterpart of the
@@ -10,7 +11,7 @@ const props = defineProps({
     userId: { type: [Number, String], required: true },
 })
 
-const { t, locale } = useI18n()
+const { t } = useI18n()
 
 const accessService = new AccessService()
 
@@ -42,7 +43,7 @@ function deviceIcon (session) {
 }
 
 function formatLastActivity (iso) {
-    return new Date(iso).toLocaleString(locale.value)
+    return formatDateTime(iso)
 }
 </script>
 

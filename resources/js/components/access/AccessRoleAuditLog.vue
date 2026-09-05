@@ -16,8 +16,8 @@ const props = defineProps({
     roleId: { type: [Number, String], default: null },
 })
 
-const { t, locale } = useI18n()
-const { fullName } = useAccessUserDisplay()
+const { t } = useI18n()
+const { fullName, formatDateTime } = useAccessUserDisplay()
 
 const accessService = new AccessService()
 
@@ -56,8 +56,8 @@ async function load (nextPage = 1) {
 
 onMounted(() => load())
 
-function formatDate (iso) {
-    return iso ? new Date(iso).toLocaleString(locale.value) : '-'
+function formatTimestamp (iso) {
+    return formatDateTime(iso) ?? '-'
 }
 
 /**
@@ -140,7 +140,7 @@ function isListChange (change) {
 const timelineItems = computed(() => entries.value.map(entry => ({
     ...entry,
     icon: actionIcon(entry),
-    date: formatDate(entry.created_at),
+    date: formatTimestamp(entry.created_at),
 })))
 </script>
 
