@@ -473,19 +473,44 @@ class AccessAdminApiTest extends AccessTestCase
             'subject' => 'subject-123',
             'last_used_at' => now(),
         ]);
+        // Inserted second but sorts first: pins the provider ordering, which the resource
+        // applies over the loaded relation rather than in SQL.
+        $target->identities()->create([
+            'provider' => 'azure',
+            'subject' => 'subject-456',
+            'last_used_at' => now(),
+        ]);
 
         $response = $this->getJson("/api/access/users/{$target->id}")->assertOk();
 
         $identities = $response->json('data.user.identities');
-        $this->assertCount(1, $identities);
-        $this->assertSame('roeid', $identities[0]['provider']);
+        $this->assertCount(2, $identities);
+        $this->assertSame(['azure', 'roeid'], array_column($identities, 'provider'));
         $this->assertNotNull($identities[0]['linked_at']);
-        $this->assertNotNull($identities[0]['last_used_at']);
+        $this->assertNotNull($identities[1]['last_used_at']);
 
         // The list stays lean: identities are detail-only.
         $listed = collect($this->getJson('/api/access/users')->json('data.users'))
             ->firstWhere('id', $target->id);
         $this->assertArrayNotHasKey('identities', $listed);
+    }
+
+    public function test_no_list_row_includes_the_detail_only_fields(): void
+    {
+        // Every row, not just the first: ::collection() builds rows through mapInto(),
+        // which passes the collection key as a second constructor argument - a positional
+        // detailed flag once made rows 1+ leak the detail-only fields while row 0 hid it.
+        $this->actingAsManager();
+        $this->createUser();
+        $this->createUser();
+
+        $rows = $this->getJson('/api/access/users')->assertOk()->json('data.users');
+
+        $this->assertGreaterThanOrEqual(3, count($rows));
+        foreach ($rows as $index => $row) {
+            $this->assertArrayNotHasKey('effective_permissions', $row, "row {$index}");
+            $this->assertArrayNotHasKey('identities', $row, "row {$index}");
+        }
     }
 
     public function test_user_roles_are_synced_through_the_api(): void
@@ -535,11 +560,13 @@ class AccessAdminApiTest extends AccessTestCase
             ->assertStatus(422);
         $this->assertTrue($holder->fresh()->hasRole($superAdmin));
 
-        // Membership kept as-is passes: a super admin's other roles stay editable.
+        // Membership kept as-is no longer helps a regular manager: the target ceiling
+        // refuses any mutation aimed at a super admin, so their other roles are editable
+        // only from the super-admin tier.
         $this->putJson("/api/access/users/{$holder->id}/roles", [
             'role_ids' => [$superAdmin->getKey(), $editors->getKey()],
-        ])->assertOk();
-        $this->assertTrue($holder->fresh()->hasRole('editors'));
+        ])->assertStatus(422);
+        $this->assertFalse($holder->fresh()->hasRole('editors'));
     }
 
     public function test_unknown_role_ids_fail_validation(): void
@@ -642,7 +669,7 @@ class AccessAdminApiTest extends AccessTestCase
 
     public function test_role_lifecycle_through_the_api(): void
     {
-        $this->actingAsManager();
+        $admin = $this->actingAsManager();
 
         $created = $this->postJson('/api/access/roles', ['name' => 'auditors'])->assertStatus(201);
         $roleId = $created->json('data.role.id');
@@ -652,6 +679,10 @@ class AccessAdminApiTest extends AccessTestCase
             ->assertJsonPath('data.role.name', 'inspectors');
 
         $permission = $this->permission('widgets.a');
+        $admin->givePermissionTo($permission);
+        // The guard caches the signed-in instance across in-test requests; drop it so the
+        // grant-ceiling check sees the fresh grant.
+        $this->app['auth']->forgetGuards();
         $this->putJson("/api/access/roles/{$roleId}/permissions", ['permission_ids' => [$permission->getKey()]])
             ->assertOk()
             ->assertJsonPath('data.role.permissions.0.name', 'widgets.a');

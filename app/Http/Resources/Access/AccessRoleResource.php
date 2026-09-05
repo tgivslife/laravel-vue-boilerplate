@@ -13,6 +13,11 @@ use Spatie\Permission\Contracts\Role as RoleContract;
  */
 final class AccessRoleResource extends JsonResource
 {
+    /**
+     * Never build this resource through ::collection(): mapInto() passes each collection
+     * key as the second constructor argument, which would silently turn holder counts
+     * into row indexes. The controllers map() explicitly, passing the count on purpose.
+     */
     public function __construct($resource, private readonly int $usersCount = 0)
     {
         parent::__construct($resource);

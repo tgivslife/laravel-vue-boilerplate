@@ -67,6 +67,7 @@ class AccessControlServiceTest extends AccessTestCase
         $actor = $this->manager();
         $target = $this->createUser();
         $permission = $this->permission('widgets.special');
+        $actor->givePermissionTo($permission);
 
         $this->service->syncUserPermissions($actor, $target, [$permission->getKey()]);
 
@@ -181,7 +182,12 @@ class AccessControlServiceTest extends AccessTestCase
 
     public function test_removing_the_last_active_holder_of_a_lockout_permission_is_refused(): void
     {
-        $actor = $this->manager('user-admins', ['users.manage']);
+        // The actor holds both lockout permissions (staying within the target's tier) but is
+        // inactive, so the target below is roles.manage's last ACTIVE holder; users.manage
+        // having no active holder at all must not interfere - the guards are per-permission.
+        $actor = $this->manager('user-admins');
+        $actor->forceFill(['is_active' => false])->save();
+
         $other = $this->manager('role-admins', ['roles.manage']);
 
         try {
@@ -205,6 +211,7 @@ class AccessControlServiceTest extends AccessTestCase
         $this->assertSame('inspectors', $role->fresh()->name);
 
         $permission = $this->permission('widgets.special');
+        $actor->givePermissionTo($permission);
         $this->service->syncRolePermissions($actor, $role, [$permission->getKey()]);
         $this->assertTrue($role->fresh()->hasPermissionTo('widgets.special'));
 
@@ -223,6 +230,7 @@ class AccessControlServiceTest extends AccessTestCase
         $target = $this->createUser();
         $target->assignRole($role);
         $permission = $this->permission('widgets.special');
+        $actor->givePermissionTo($permission);
 
         $this->service->syncRolePermissions($actor, $role, [$permission->getKey()]);
         $this->assertTrue($target->fresh()->can('widgets.special'));

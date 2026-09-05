@@ -14,13 +14,13 @@ const { fullName, formatDateTime, formatDate, statusOf } = useAccessUserDisplay(
 
 const accessService = new AccessService()
 
-/* Impersonation is offered when the deployment has it switched on and the admin holds the
- * capability; per-row it is further hidden for the admin's own account. Tier limits (super
- * admins, other access administrators) stay server-authoritative - a blocked target answers 422. */
+/* Impersonation is offered when the deployment has it switched on and the admin holds the capability;
+ * per-row it is further hidden for the admin's own account and for targets above
+ * the impersonation tier (`impersonable`, computed server-side - the server stays authoritative). */
 const canImpersonate = computed(() => can('users.impersonate') && authStore.user?.impersonation_available === true)
 
 function mayImpersonate (user) {
-    return canImpersonate.value && user.id !== authStore.user?.id
+    return canImpersonate.value && user.id !== authStore.user?.id && user.impersonable !== false
 }
 
 /* ------------------------------------------------------------------ *
@@ -210,7 +210,15 @@ async function loadStats () {
     }
 }
 
+/* The role filter needs the roles dictionary, which sits behind roles.view,
+ * without the capability the request would only ever 403 (view-only and impersonate-only admins). */
+const canFilterByRole = computed(() => can('roles.view'))
+
 async function loadDictionaries () {
+    if (!canFilterByRole.value) {
+        return
+    }
+
     try {
         const rolesData = await accessService.fetchRoles()
         roles.value = rolesData.roles
@@ -380,6 +388,11 @@ const table = useTemplateRef('table')
 const columnVisibility = ref({})
 const rowSelection = ref({})
 
+/* Out-of-reach rows (the target ceiling) cannot enter the bulk selection,
+ * every bulk action would just 422 for them. TanStack consults this for select-all too,
+ * so the header checkbox only ever gathers rows the admin can actually act on. */
+const rowSelectionOptions = { enableRowSelection: row => row.original.manageable !== false }
+
 const columns = computed(() => [
     ...(canManage.value ? [{ id: 'select', enableHiding: false, meta: { class: { td: 'w-10' } } }] : []),
     { accessorKey: 'name', header: t('messages.access.users.col_name'), enableHiding: false },
@@ -422,32 +435,46 @@ const columnVisibilityItems = computed(() => (table.value?.tableApi?.getAllColum
         },
     })))
 
-/* View is an inline icon button; the menu carries every mutation. */
+/* View is an inline icon button; the menu carries whatever the admin can actually do to the row.
+ * Account mutations need users.manage plus a within-reach target; impersonation rides its own capability and tier,
+ * so a view+impersonate support role still gets its action without any account management. */
+function mayMutate (user) {
+    return canManage.value && user.manageable !== false
+}
+
+function hasRowActions (user) {
+    return mayMutate(user) || mayImpersonate(user)
+}
+
 function rowActions (user) {
     return [
         { type: 'label', label: t('messages.access.users.actions') },
-        {
-            label: user.is_active
-                ? t('messages.access.users.deactivate')
-                : t('messages.access.users.activate'),
-            icon: user.is_active ? 'i-tabler-user-off' : 'i-tabler-user-check',
-            onSelect: () => setActive(user, !user.is_active),
-        },
 
-        ...(user.invitable
-            ? [{
-                label: t('messages.access.users.resend_invitation'),
-                icon: 'i-tabler-mail-forward',
-                color: 'success',
-                onSelect: () => resendInvitation(user),
-            }]
+        ...(mayMutate(user)
+            ? [
+                {
+                    label: user.is_active
+                        ? t('messages.access.users.deactivate')
+                        : t('messages.access.users.activate'),
+                    icon: user.is_active ? 'i-tabler-user-off' : 'i-tabler-user-check',
+                    onSelect: () => setActive(user, !user.is_active),
+                },
+                ...(user.invitable
+                    ? [{
+                        label: t('messages.access.users.resend_invitation'),
+                        icon: 'i-tabler-mail-forward',
+                        color: 'success',
+                        onSelect: () => resendInvitation(user),
+                    }]
+                    : []),
+                {
+                    label: t('messages.access.users.force_reset'),
+                    icon: 'i-tabler-key',
+                    color: 'warning',
+                    onSelect: () => openResetModal(user),
+                },
+            ]
             : []),
-        {
-            label: t('messages.access.users.force_reset'),
-            icon: 'i-tabler-key',
-            color: 'warning',
-            onSelect: () => openResetModal(user),
-        },
 
         ...(mayImpersonate(user)
             ? [{
@@ -462,13 +489,18 @@ function rowActions (user) {
                 onSelect: () => openImpersonateModal(user),
             }]
             : []),
-        { type: 'separator' },
-        {
-            label: t('messages.access.users.delete_account'),
-            icon: 'i-tabler-trash',
-            color: 'error',
-            onSelect: () => openDeleteModal(user),
-        },
+
+        ...(mayMutate(user)
+            ? [
+                { type: 'separator' },
+                {
+                    label: t('messages.access.users.delete_account'),
+                    icon: 'i-tabler-trash',
+                    color: 'error',
+                    onSelect: () => openDeleteModal(user),
+                },
+            ]
+            : []),
     ]
 }
 
@@ -487,8 +519,8 @@ async function setActive (user, active) {
 }
 
 /*
- * Re-mail a pending invitation's first-sign-in link; the server revokes
- * the previous one and refuses accounts that were already entered.
+ * Re-mail a pending invitation's first-sign-in link;
+ * the server revokes the previous one and refuses accounts that were already entered.
  */
 async function resendInvitation (user) {
     try {
@@ -524,8 +556,7 @@ function mutationErrorToast (error) {
 }
 
 /* ------------------------------------------------------------------ *
- *  Force password reset (same flow as the detail page: the server
- *  generates a temporary password shown exactly once)
+ *  Force password reset (same flow as the detail page: the server generates a temporary password shown exactly once)
  * ------------------------------------------------------------------ */
 
 const resetOpen = ref(false)
@@ -640,17 +671,15 @@ async function deleteAccount () {
 }
 
 /* ------------------------------------------------------------------ *
- *  Bulk actions (checkbox selection; each target goes through the
- *  same single-user endpoints, so the lockout guards apply per user)
+ *  Bulk actions (checkbox selection; each target goes through the same single-user endpoints, so the lockout guards apply per user)
  * ------------------------------------------------------------------ */
 
 const selectedCount = computed(() => Object.values(rowSelection.value).filter(Boolean).length)
 const bulkDeleteOpen = ref(false)
 const bulkWorking = ref(false)
 
-/* Selection is keyed by user id (getRowId) and survives page changes, so
- * the targets come from the selection state itself - the row model only
- * knows the page currently rendered. */
+/* Selection is keyed by user id (getRowId) and survives page changes, so the targets come from the selection state itself,
+ * the row model only knows the page currently rendered. */
 function selectedUserIds () {
     return Object.keys(rowSelection.value).filter(id => rowSelection.value[id])
 }
@@ -957,6 +986,7 @@ async function exportCsv () {
             :columns="columns"
             :loading="loading"
             :get-row-id="user => String(user.id)"
+            :row-selection-options="rowSelectionOptions"
             class="border border-default rounded-lg"
             @select="onRowSelect"
         >
@@ -977,6 +1007,7 @@ async function exportCsv () {
             <template #select-cell="{ row }">
                 <div @click.stop>
                     <UCheckbox
+                        v-if="row.getCanSelect()"
                         :model-value="row.getIsSelected()"
                         :aria-label="t('messages.access.users.select_row')"
                         @update:model-value="value => row.toggleSelected(!!value)"
@@ -1113,7 +1144,7 @@ async function exportCsv () {
                         @click="openDetail(row.original)"
                     />
                     <UDropdownMenu
-                        v-if="canManage"
+                        v-if="hasRowActions(row.original)"
                         :items="rowActions(row.original)"
                         :content="{ align: 'end' }"
                         :aria-label="t('messages.access.users.actions')"
@@ -1161,7 +1192,7 @@ async function exportCsv () {
     >
         <template #body>
             <div class="flex flex-col gap-4">
-                <UFormField :label="t('messages.access.users.role_filter')">
+                <UFormField v-if="canFilterByRole" :label="t('messages.access.users.role_filter')">
                     <USelect
                         v-model="roleFilter"
                         :items="roleFilterItems"

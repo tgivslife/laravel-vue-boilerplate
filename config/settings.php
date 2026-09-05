@@ -160,7 +160,8 @@ return [
             ],
             'access' => [
                 'access.guard', 'access.super_admin_role', 'access.self_provision_roles',
-                'access.lockout_permissions', 'access.impersonation.enabled', 'access.audit_log.retention_days',
+                'access.lockout_permissions', 'access.privileged_permissions', 'access.impersonation.enabled',
+                'access.audit_log.retention_days',
             ],
             'auditing' => [
                 'audit.enabled', 'audit.console', 'audit.retention_days',

@@ -41,7 +41,7 @@ class UserAccountController extends Controller
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: __('api.access.account_updated'),
-            data: ['user' => new AccessUserResource($user->refresh(), detailed: true)],
+            data: ['user' => new AccessUserResource($user->refresh())->detailed()],
         )->toResponse($request);
     }
 
@@ -58,7 +58,7 @@ class UserAccountController extends Controller
             status: Response::HTTP_OK,
             message: __('api.access.password_reset_forced'),
             data: [
-                'user' => new AccessUserResource($user->refresh(), detailed: true),
+                'user' => new AccessUserResource($user->refresh())->detailed(),
                 'temporary_password' => $temporaryPassword,
             ],
         )->toResponse($request);
@@ -78,7 +78,7 @@ class UserAccountController extends Controller
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: __('api.access.invitation_sent'),
-            data: ['user' => new AccessUserResource($user->refresh(), detailed: true)],
+            data: ['user' => new AccessUserResource($user->refresh())->detailed()],
         )->toResponse($request);
     }
 
@@ -97,7 +97,7 @@ class UserAccountController extends Controller
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: __('api.access.two_factor_reset'),
-            data: ['user' => new AccessUserResource($user->refresh(), detailed: true)],
+            data: ['user' => new AccessUserResource($user->refresh())->detailed()],
         )->toResponse($request);
     }
 

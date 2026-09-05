@@ -3,24 +3,41 @@
 namespace App\Http\Resources\Access;
 
 use App\Models\User;
+use App\Services\Access\AccessScope;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
  * A user in the admin users browser: identity, account state, security posture, roles and direct permissions.
+ * Every row carries the requesting admin's reach verdicts - `manageable` (the target ceiling) and `impersonable`
+ * (the strict impersonation tier) - so both the list's row actions and the detail page render out-of-reach
+ * accounts read-only instead of surfacing the server's 422s.
  * The detailed form adds the effective permission set (direct + via roles) the editor renders as disabled checks.
  */
 final class AccessUserResource extends JsonResource
 {
-    public function __construct($resource, private readonly bool $detailed = false)
+    private bool $detailed = false;
+
+    /**
+     * Include the detail-only fields (effective permissions, identities).
+     *
+     * A fluent switch instead of a constructor flag on purpose: ::collection() builds rows through mapInto(),
+     * which passes each collection key as a second constructor argument, a positional bool here would silently flip
+     * every row after the first to detailed.
+     */
+    public function detailed(): static
     {
-        parent::__construct($resource);
+        $this->detailed = true;
+
+        return $this;
     }
 
     public function toArray(Request $request): array
     {
         /** @var User $user */
         $user = $this->resource;
+
+        $access = app(AccessScope::class);
 
         return [
             'id' => $user->getKey(),
@@ -50,9 +67,11 @@ final class AccessUserResource extends JsonResource
                 $this->detailed,
                 static fn(): array => $user->getAllPermissions()->pluck('name')->sort()->values()->all()
             ),
+            'manageable' => !$access->targetOutranksActor($request->user(), $user),
+            'impersonable' => $access->isSuperAdmin($request->user()) || !$access->isTopTier($user),
             'identities' => $this->when(
                 $this->detailed,
-                static fn(): array => $user->identities()->orderBy('provider')->get()
+                static fn(): array => $user->identities->sortBy('provider')->values()
                     ->map(static fn($identity): array => [
                         'provider' => $identity->provider,
                         'linked_at' => $identity->created_at?->toISOString(),

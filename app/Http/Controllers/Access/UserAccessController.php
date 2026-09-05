@@ -21,10 +21,9 @@ use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
- * The admin users browser: who exists, what they hold, headline counts,
- * CSV export, account creation, and the two sync endpoints that reshape a
- * user's roles and direct permissions. Mutations go through
- * AccessControlService (lockout guards + audit).
+ * The admin users browser: who exists, what they hold, headline counts, CSV export, account creation, and the two sync
+ * endpoints that reshape a user's roles and direct permissions.
+ * Mutations go through AccessControlService (lockout guards + audit).
  */
 class UserAccessController extends Controller
 {
@@ -35,16 +34,16 @@ class UserAccessController extends Controller
 
     /**
      * List users with their roles and direct permissions, newest first.
-     * `filter[search]` matches the configured user columns (bound LIKE, no
-     * raw SQL); `filter[role_id]` and `filter[status]` narrow the list
-     * further; `per_page` picks one of the allowed page sizes. Unknown
-     * filter keys are rejected by QueryBuilder with a 400; the request
-     * validates the values.
+     * `filter[search]` matches the configured user columns (bound LIKE, no raw SQL);
+     * `filter[role_id]` and `filter[status]` narrow the list further;
+     * `per_page` picks one of the allowed page sizes.
+     * Unknown filter keys are rejected by QueryBuilder with a 400; the request validates the values.
      */
     public function index(UserIndexRequest $request): JsonResponse
     {
         $users = $this->filteredUsers()
-            ->with(['roles:id,name', 'permissions:id,name'])
+            // roles.permissions feeds the per-row reach verdicts (manageable/impersonable) without an extra query per row.
+            ->with(['roles:id,name', 'roles.permissions:id,name', 'permissions:id,name'])
             ->paginate((int) ($request->validated('per_page') ?? config('access.user_browser.per_page', 25)));
 
         return new JsonSuccessResponse(
@@ -59,9 +58,8 @@ class UserAccessController extends Controller
     }
 
     /**
-     * Headline counts for the users browser: population, health and
-     * this week's intake. The delta compares the new accounts of the
-     * last seven days against the seven days before; it is null when
+     * Headline counts for the users browser: population, health and this week's intake.
+     * The delta compares the new accounts of the last seven days against the seven days before; it is null when
      * the earlier window is empty (no baseline to compare against).
      */
     public function stats(Request $request): JsonResponse
@@ -91,8 +89,8 @@ class UserAccessController extends Controller
     }
 
     /**
-     * Stream the filtered user list as a CSV download. The same filters
-     * as the index apply; pagination does not.
+     * Stream the filtered user list as a CSV download.
+     * The same filters as the index apply; pagination does not.
      */
     public function export(UserIndexRequest $request): StreamedResponse
     {
@@ -150,7 +148,7 @@ class UserAccessController extends Controller
             status: Response::HTTP_CREATED,
             message: __($delivery === 'invitation' ? 'api.access.user_invited' : 'api.access.user_created'),
             data: [
-                'user' => new AccessUserResource($user->refresh(), detailed: true),
+                'user' => new AccessUserResource($user->refresh())->detailed(),
             ] + ($temporaryPassword === null ? [] : ['temporary_password' => $temporaryPassword]),
         )->toResponse($request);
     }
@@ -228,15 +226,14 @@ class UserAccessController extends Controller
     }
 
     /**
-     * One user's full access picture, including the effective permission
-     * set (direct + via roles) the editor renders as disabled checks.
+     * One user's full access picture, including the effective permission set (direct + via roles) the editor renders as disabled checks.
      */
     public function show(Request $request, User $user): JsonResponse
     {
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: 'User retrieved successfully',
-            data: ['user' => new AccessUserResource($user, detailed: true)],
+            data: ['user' => new AccessUserResource($user)->detailed()],
         )->toResponse($request);
     }
 
@@ -250,7 +247,7 @@ class UserAccessController extends Controller
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: __('api.access.roles_updated'),
-            data: ['user' => new AccessUserResource($user->refresh(), detailed: true)],
+            data: ['user' => new AccessUserResource($user->refresh())->detailed()],
         )->toResponse($request);
     }
 
@@ -264,7 +261,7 @@ class UserAccessController extends Controller
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
             message: __('api.access.permissions_updated'),
-            data: ['user' => new AccessUserResource($user->refresh(), detailed: true)],
+            data: ['user' => new AccessUserResource($user->refresh())->detailed()],
         )->toResponse($request);
     }
 }

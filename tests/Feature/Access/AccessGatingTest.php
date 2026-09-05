@@ -78,7 +78,9 @@ class AccessGatingTest extends AccessTestCase
         $created = $this->postJson('/api/access/roles', ['name' => 'auditors'])->assertStatus(201);
         $roleId = $created->json('data.role.id');
 
-        $permission = $this->permission('widgets.special');
+        // Syncing the actor's own capability keeps them a pure roles.manage holder - the grant
+        // ceiling would refuse any permission they don't hold.
+        $permission = $this->permission('roles.manage');
         $this->putJson("/api/access/roles/{$roleId}/permissions", ['permission_ids' => [$permission->getKey()]])
             ->assertOk();
 

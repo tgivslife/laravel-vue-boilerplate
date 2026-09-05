@@ -22,11 +22,14 @@ use Spatie\Permission\PermissionRegistrar;
  * The single write path for access control.
  *
  * Every mutation runs in one transaction serialized on the lockout permission rows, is audited with scalar before/after
- * snapshots (no-op mutations write no entry), and is verified against the lockout invariants before commit,
- * independently for each configured lockout permission:
+ * snapshots (no-op mutations write no entry), and is verified against the invariants before commit:
  *
  *  - self-revocation: the acting admin cannot strip their own effective grant of a lockout permission they held when the mutation began;
- *  - last man standing: a mutation cannot strip a lockout permission's last active holder (super admins count as holders of everything).
+ *  - last man standing: a mutation cannot strip a lockout permission's last active holder (super admins count as holders of everything);
+ *  - target ceiling: no mutation may touch an account holding the super-admin role or a privileged permission the actor lacks;
+ *  - grant ceiling: permissions and roles being added must sit within what the actor effectively holds.
+ *
+ * The lockout invariants hold independently for each configured lockout permission.
  */
 final readonly class AccessControlService
 {
@@ -43,16 +46,23 @@ final readonly class AccessControlService
     /**
      * Replace the target user's roles.
      *
+     * @param  User  $actor
+     * @param  User  $target
      * @param  list<int>  $roleIds
      */
     public function syncUserRoles(User $actor, User $target, array $roleIds): void
     {
         $this->assertSuperAdminMembershipUnchanged($target, $roleIds);
 
-        $this->mutate($actor, function () use ($actor, $target, $roleIds): void {
+        $this->mutate($actor, $target, function () use ($actor, $target, $roleIds): void {
             $roles = $this->roleModel()::whereIn('id', $roleIds)->get();
 
             $before = $target->roles()->pluck('name')->sort()->values()->all();
+            // The grant ceiling runs in here rather than before mutate() (where the membership assertion sits) because
+            // the added-delta needs the before-state, read inside the transaction under the same lock.
+            $this->assertMayGrantRoles($actor, $roles->filter(
+                static fn(RoleContract $role): bool => !in_array($role->name, $before, true)
+            ));
             $target->syncRoles($roles);
             $after = $target->roles()->pluck('name')->sort()->values()->all();
 
@@ -65,14 +75,17 @@ final readonly class AccessControlService
     /**
      * Replace the target user's direct permissions.
      *
+     * @param  User  $actor
+     * @param  User  $target
      * @param  list<int>  $permissionIds
      */
     public function syncUserPermissions(User $actor, User $target, array $permissionIds): void
     {
-        $this->mutate($actor, function () use ($actor, $target, $permissionIds): void {
+        $this->mutate($actor, $target, function () use ($actor, $target, $permissionIds): void {
             $permissions = $this->permissionModel()::whereIn('id', $permissionIds)->get();
 
             $before = $target->getDirectPermissions()->pluck('name')->sort()->values()->all();
+            $this->assertMayGrantPermissions($actor, array_diff($permissions->pluck('name')->all(), $before));
             $target->syncPermissions($permissions);
             $after = $target->getDirectPermissions()->pluck('name')->sort()->values()->all();
 
@@ -94,7 +107,7 @@ final readonly class AccessControlService
      */
     public function updateUserAccount(User $actor, User $target, array $attributes): void
     {
-        $this->mutate($actor, function () use ($actor, $target, $attributes): void {
+        $this->mutate($actor, $target, function () use ($actor, $target, $attributes): void {
             $before = $this->accountSnapshot($target);
 
             if (array_key_exists('first_name', $attributes)) {
@@ -167,37 +180,40 @@ final readonly class AccessControlService
         $invitation = $delivery === 'invitation';
         $password = $invitation ? null : $this->generateTemporaryPassword();
 
-        $user = $this->mutate($actor, function () use ($actor, $attributes, $roleIds, $password, $invitation): User {
-            $user = new User;
-            $user->first_name = $attributes['first_name'];
-            $user->last_name = $attributes['last_name'];
-            $user->email = $attributes['email'];
-            $user->is_active = true;
+        $user = $this->mutate($actor, null,
+            function () use ($actor, $attributes, $roleIds, $password, $invitation): User {
+                $user = new User;
+                $user->first_name = $attributes['first_name'];
+                $user->last_name = $attributes['last_name'];
+                $user->email = $attributes['email'];
+                $user->is_active = true;
 
-            if ($invitation) {
-                $user->require_password_reset = (bool) config('security.password_login.enabled', true)
-                    && !(bool) config('security.magic_link.enabled', true);
-                $user->two_factor_required = (bool) config('security.invitations.two_factor_required', false);
-            } else {
-                $user->password = $password;
-                $user->password_changed_at = now();
-                $user->require_password_reset = true;
-            }
+                if ($invitation) {
+                    $user->require_password_reset = (bool) config('security.password_login.enabled', true)
+                        && !(bool) config('security.magic_link.enabled', true);
+                    $user->two_factor_required = (bool) config('security.invitations.two_factor_required', false);
+                } else {
+                    $user->password = $password;
+                    $user->password_changed_at = now();
+                    $user->require_password_reset = true;
+                }
 
-            $user->save();
+                $user->save();
 
-            if ($roleIds !== []) {
-                $this->assertSuperAdminMembershipUnchanged($user, $roleIds);
-                $user->syncRoles($this->roleModel()::whereIn('id', $roleIds)->get());
-            }
+                if ($roleIds !== []) {
+                    $this->assertSuperAdminMembershipUnchanged($user, $roleIds);
+                    $roles = $this->roleModel()::whereIn('id', $roleIds)->get();
+                    $this->assertMayGrantRoles($actor, $roles);
+                    $user->syncRoles($roles);
+                }
 
-            $this->audit($actor, $invitation ? 'user.invited' : 'user.created', $user, null,
-                $this->accountSnapshot($user) + [
-                    'roles' => $user->roles()->pluck('name')->sort()->values()->all(),
-                ]);
+                $this->audit($actor, $invitation ? 'user.invited' : 'user.created', $user, null,
+                    $this->accountSnapshot($user) + [
+                        'roles' => $user->roles()->pluck('name')->sort()->values()->all(),
+                    ]);
 
-            return $user;
-        });
+                return $user;
+            });
 
         if ($invitation) {
             $this->magicLinks->invite($user);
@@ -224,7 +240,7 @@ final readonly class AccessControlService
             ]);
         }
 
-        $this->mutate($actor, function () use ($actor, $target): void {
+        $this->mutate($actor, $target, function () use ($actor, $target): void {
             $this->audit($actor, 'user.invitation_resent', $target, null, ['email' => $target->email]);
         });
 
@@ -243,7 +259,7 @@ final readonly class AccessControlService
     {
         $password = $this->generateTemporaryPassword();
 
-        $this->mutate($actor, function () use ($actor, $target, $password): void {
+        $this->mutate($actor, $target, function () use ($actor, $target, $password): void {
             $before = ['require_password_reset' => (bool) $target->require_password_reset];
 
             $target->password = $password;
@@ -272,7 +288,7 @@ final readonly class AccessControlService
      */
     public function resetTwoFactor(User $actor, User $target): void
     {
-        $wasEnrolled = $this->mutate($actor, function () use ($actor, $target): bool {
+        $wasEnrolled = $this->mutate($actor, $target, function () use ($actor, $target): bool {
             if ($target->two_factor_secret === null) {
                 return false;
             }
@@ -324,7 +340,7 @@ final readonly class AccessControlService
             ]);
         }
 
-        $this->mutate($actor, function () use ($actor, $target): void {
+        $this->mutate($actor, $target, function () use ($actor, $target): void {
             $before = $this->accountSnapshot($target) + [
                     'roles' => $target->roles()->pluck('name')->sort()->values()->all(),
                 ];
@@ -356,11 +372,13 @@ final readonly class AccessControlService
     }
 
     /**
-     * Create a role in the configured guard.
+     * Create a role in the configured guard. The super-admin name is reserved.
      */
     public function createRole(User $actor, string $name): RoleContract
     {
-        return $this->mutate($actor, function () use ($actor, $name): RoleContract {
+        $this->assertNotSuperAdminName($name);
+
+        return $this->mutate($actor, null, function () use ($actor, $name): RoleContract {
             $role = $this->roleModel()::create([
                 'name' => $name,
                 'guard_name' => config('access.guard'),
@@ -374,12 +392,14 @@ final readonly class AccessControlService
 
     /**
      * Rename a role. Never the super-admin role: code references it by name, so renaming it would revoke every super admin at once.
+     * Nor *into* the super-admin name: holders of the renamed role would become super admins with no membership change.
      */
     public function renameRole(User $actor, RoleContract $role, string $name): RoleContract
     {
         $this->assertNotSuperAdminRole($role);
+        $this->assertNotSuperAdminName($name);
 
-        return $this->mutate($actor, function () use ($actor, $role, $name): RoleContract {
+        return $this->mutate($actor, null, function () use ($actor, $role, $name): RoleContract {
             $before = ['name' => $role->name];
             $role->update(['name' => $name]);
 
@@ -397,7 +417,7 @@ final readonly class AccessControlService
     {
         $this->assertNotSuperAdminRole($role);
 
-        $this->mutate($actor, function () use ($actor, $role): void {
+        $this->mutate($actor, null, function () use ($actor, $role): void {
             $before = [
                 'name' => $role->name,
                 'permissions' => $role->permissions()->pluck('name')->sort()->values()->all(),
@@ -417,10 +437,11 @@ final readonly class AccessControlService
      */
     public function syncRolePermissions(User $actor, RoleContract $role, array $permissionIds): void
     {
-        $this->mutate($actor, function () use ($actor, $role, $permissionIds): void {
+        $this->mutate($actor, null, function () use ($actor, $role, $permissionIds): void {
             $permissions = $this->permissionModel()::whereIn('id', $permissionIds)->get();
 
             $before = $role->permissions()->pluck('name')->sort()->values()->all();
+            $this->assertMayGrantPermissions($actor, array_diff($permissions->pluck('name')->all(), $before));
             $role->syncPermissions($permissions);
             $after = $role->permissions()->pluck('name')->sort()->values()->all();
 
@@ -440,7 +461,7 @@ final readonly class AccessControlService
     {
         $this->assertProtectable($alias);
 
-        $this->mutate($actor, function () use ($actor, $alias, $type, $permissionIds, $mode): void {
+        $this->mutate($actor, null, function () use ($actor, $alias, $type, $permissionIds, $mode): void {
             $before = $this->ruleSnapshot($alias, null, $type);
             $this->replaceRuleGroup($alias, null, $type, $permissionIds, $mode);
 
@@ -463,7 +484,7 @@ final readonly class AccessControlService
         $alias = $record->getMorphClass();
         $this->assertProtectable($alias);
 
-        $this->mutate($actor, function () use ($actor, $record, $alias, $type, $permissionIds, $mode): void {
+        $this->mutate($actor, null, function () use ($actor, $record, $alias, $type, $permissionIds, $mode): void {
             $before = $this->ruleSnapshot($alias, (int) $record->getKey(), $type);
             $this->replaceRuleGroup($alias, (int) $record->getKey(), $type, $permissionIds, $mode);
 
@@ -513,15 +534,22 @@ final readonly class AccessControlService
     }
 
     /**
-     * Run a mutation under the shared lock and enforce the lockout invariants before commit; throwing rolls the whole mutation back.
-     * Pre-mutation state is snapshotted so the guards only fire for what the mutation itself broke: self-revocation
+     * Run a mutation under the shared lock and enforce the invariants before commit; throwing rolls the whole mutation back.
+     * The target is part of the signature so no mutation can silently skip the tier decision: user-directed methods
+     * pass their target, role/rule methods pass null.
+     * The tier is checked inside the transaction, after the lock, so it reads state no concurrent mutation is changing.
+     * Pre-mutation state is snapshotted so the lockout guards only fire for what the mutation itself broke: self-revocation
      * for grants the actor actually held, last-holder for permissions that still had an active holder.
      * Permission caches are flushed after commit.
      */
-    private function mutate(User $actor, Closure $callback): mixed
+    private function mutate(User $actor, ?User $target, Closure $callback): mixed
     {
-        $result = DB::transaction(function () use ($actor, $callback) {
+        $result = DB::transaction(function () use ($actor, $target, $callback) {
             $permissions = $this->lockLockoutPermissionRows();
+
+            if ($target !== null) {
+                $this->assertTargetWithinTier($actor, $target);
+            }
 
             $heldBefore = [];
             $activeBefore = [];
@@ -608,10 +636,11 @@ final readonly class AccessControlService
     }
 
     /**
-     * The super-admin role bypasses every gate, policy and visibility scope, so an access manager
-     * must not be able to grant it (privilege escalation) or strip it (neutralizing break-glass);
-     * membership changes only via seeder or console.
-     * Payloads that keep membership as-is pass, so a super admin's other roles stay editable.
+     * The super-admin role bypasses every gate, policy and visibility scope, so an access manager must not be able to
+     * grant it (privilege escalation) or strip it (neutralizing break-glass); membership changes only via seeder or console.
+     * Payloads that keep membership as-is pass this check - but only a super-admin actor gets that far, since the
+     * target ceiling refuses everyone else acting on a super admin.
+     * Their other roles stay editable from the top tier alone.
      *
      * @param  list<int>  $roleIds
      */
@@ -635,11 +664,71 @@ final readonly class AccessControlService
         }
     }
 
+    /**
+     * The grant ceiling: an actor may only hand out permissions they effectively hold (super admins hold everything).
+     * Applies to the names being added relative to current state - removals stay governed by the lockout guards -
+     * so a grant already above the actor's ceiling remains removable, just never re-growable.
+     *
+     * @param  iterable<string>  $addedNames
+     */
+    private function assertMayGrantPermissions(User $actor, iterable $addedNames): void
+    {
+        foreach ($addedNames as $name) {
+            if (!$this->access->holdsPermission($actor, $name)) {
+                throw ValidationException::withMessages([
+                    'access' => __('api.access.grant_above_ceiling'),
+                ]);
+            }
+        }
+    }
+
+    /**
+     * The grant ceiling over roles: assigning a role grants everything it carries, so every
+     * permission of every role being added must sit within the actor's ceiling.
+     *
+     * @param  iterable<RoleContract>  $addedRoles
+     */
+    private function assertMayGrantRoles(User $actor, iterable $addedRoles): void
+    {
+        foreach ($addedRoles as $role) {
+            $this->assertMayGrantPermissions($actor, $role->permissions()->pluck('name')->all());
+        }
+    }
+
+    /**
+     * The target ceiling: an account holding the super-admin role or an effective privileged permission the actor
+     * lacks is out of the actor's administrative reach entirely - no grant edits, no account-fact edits, no
+     * credential or two-factor resets. Subset semantics on purpose: equal-tier admins keep managing each other.
+     * Self-targeting always passes (nobody outranks themselves); the grant ceiling is what stops self-escalation.
+     */
+    private function assertTargetWithinTier(User $actor, User $target): void
+    {
+        if ($this->access->targetOutranksActor($actor, $target)) {
+            throw ValidationException::withMessages([
+                'access' => __('api.access.target_above_tier'),
+            ]);
+        }
+    }
+
     private function assertNotSuperAdminRole(RoleContract $role): void
     {
         if ($role->name === config('access.super_admin_role')) {
             throw ValidationException::withMessages([
                 'access' => __('api.access.protected_role'),
+            ]);
+        }
+    }
+
+    /**
+     * The configured super-admin name is reserved: hasRole() matches by name, so creating or renaming a role into it
+     * would mint the break-glass bypass for everyone holding it.
+     * The form requests' unique rule only collides in installs that seeded the row - this holds regardless.
+     */
+    private function assertNotSuperAdminName(string $name): void
+    {
+        if ($name === config('access.super_admin_role')) {
+            throw ValidationException::withMessages([
+                'access' => __('api.access.reserved_role_name'),
             ]);
         }
     }
@@ -654,9 +743,8 @@ final readonly class AccessControlService
     }
 
     /**
-     * Replace a rule group in place: drop rows leaving the group, upsert the
-     * rest with the group's mode. Serialized by the lockout-permission lock;
-     * the partial unique indexes backstop duplicates regardless.
+     * Replace a rule group in place: drop rows leaving the group, upsert the rest with the group's mode.
+     * Serialized by the lockout-permission lock; the partial unique indexes backstop duplicates regardless.
      *
      * @param  list<int>  $permissionIds
      */

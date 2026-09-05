@@ -225,7 +225,9 @@ class ImpersonationTest extends AccessTestCase
 
     public function test_identity_critical_surfaces_are_closed_while_impersonating(): void
     {
-        $this->actingAsImpersonator();
+        // A super-admin actor: the target's users.impersonate grant is privileged, so only the
+        // super-admin tier reaches them - and every surface below belongs to the borrowed identity.
+        $this->actingAsSuperAdmin();
         // The target holds browsing rights of their own, proving the block is the marker, not a
         // missing capability - and doubling as the no-nesting case on the impersonate endpoint.
         $target = $this->userWithPermissions('users.view', 'users.impersonate');

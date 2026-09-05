@@ -24,6 +24,13 @@ final class AccessScope
     private array $permissionIds = [];
 
     /**
+     * Held permission names per user key.
+     *
+     * @var array<int|string, list<string>>
+     */
+    private array $permissionNames = [];
+
+    /**
      * Super-admin verdict per user key.
      *
      * @var array<int|string, bool>
@@ -81,6 +88,62 @@ final class AccessScope
         return $this->permissionIds[$key] ??= method_exists($user, 'getAllPermissions')
             ? $user->getAllPermissions()->pluck('id')->all()
             : [];
+    }
+
+    /**
+     * The names of every permission the user holds (direct and via roles).
+     *
+     * @return list<string>
+     */
+    public function permissionNames(Authenticatable $user): array
+    {
+        $key = $user->getAuthIdentifier();
+
+        return $this->permissionNames[$key] ??= method_exists($user, 'getAllPermissions')
+            ? $user->getAllPermissions()->pluck('name')->all()
+            : [];
+    }
+
+    /**
+     * Whether the user effectively holds the named permission.
+     *
+     * True unconditionally for super admins: their role carries no attached permissions
+     * (Gate::before answers for it), so the name lookup alone would say they hold nothing.
+     */
+    public function holdsPermission(Authenticatable $user, string $name): bool
+    {
+        return $this->isSuperAdmin($user) || in_array($name, $this->permissionNames($user), true);
+    }
+
+    /**
+     * Whether the account sits at the top of the administrative ladder: the super-admin role or any effective privileged permission.
+     * Strict on purpose - impersonation uses it to refuse peer admins too, so borrowing an admin identity requires the super-admin tier.
+     */
+    public function isTopTier(Authenticatable $user): bool
+    {
+        return $this->isSuperAdmin($user)
+            || array_intersect(config('access.privileged_permissions', []), $this->permissionNames($user)) !== [];
+    }
+
+    /**
+     * Whether the target holds the super-admin role or a privileged permission the actor lacks.
+     *
+     * Subset semantics rather than isTopTier(): two admins with identical grants keep managing each other.
+     * Always false for super-admin actors, and for self-targeting.
+     */
+    public function targetOutranksActor(Authenticatable $actor, Authenticatable $target): bool
+    {
+        if ($this->isSuperAdmin($actor)) {
+            return false;
+        }
+
+        if ($this->isSuperAdmin($target)) {
+            return true;
+        }
+
+        $privileged = array_intersect(config('access.privileged_permissions', []), $this->permissionNames($target));
+
+        return array_diff($privileged, $this->permissionNames($actor)) !== [];
     }
 
     /**
@@ -203,6 +266,7 @@ final class AccessScope
     public function flush(): void
     {
         $this->permissionIds = [];
+        $this->permissionNames = [];
         $this->superAdmin = [];
         $this->dimensions = null;
         $this->flushRules();

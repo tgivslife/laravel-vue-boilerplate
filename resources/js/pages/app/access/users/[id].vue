@@ -35,7 +35,12 @@ const user = ref(null)
 const loading = ref(true)
 const failed = ref(false)
 
-const canManage = computed(() => can('users.manage'))
+/* The target ceiling, mirrored from the server (`manageable` on the detail payload): an
+ * account holding a privileged permission the signed-in admin lacks refuses every mutation
+ * with a 422, so its editing controls render read-only instead. */
+const targetManageable = computed(() => user.value?.manageable !== false)
+
+const canManage = computed(() => can('users.manage') && targetManageable.value)
 
 /* A tombstoned account is a permanent read-only record: the logs stay
  * readable, every mutation stays hidden - deletion is final, no restore. */
@@ -46,8 +51,9 @@ const isDeleted = computed(() => !!user.value?.deleted_at)
 const twoFactorAvailable = computed(() => authStore.user?.two_factor_available !== false)
 const identityProvidersAvailable = computed(() => authStore.user?.identity_providers_available !== false)
 
-/* The grant editor needs the roles/permissions dictionaries (roles.view). */
-const canPickGrants = computed(() => can('users.manage') && can('roles.view'))
+/* The grant editor needs the roles/permissions dictionaries (roles.view); an out-of-reach
+ * target falls through to the same read-only badge view deleted users get. */
+const canPickGrants = computed(() => canManage.value && can('roles.view'))
 
 const roles = ref([])
 const permissions = ref([])
@@ -70,6 +76,17 @@ function applyUser (freshUser) {
 const protectedRoleNames = computed(() => roles.value
     .filter(role => role.protected)
     .map(role => role.name))
+
+/* Grants above the signed-in admin's own ceiling: the server refuses adding them, so the
+ * picker locks them for adding (they stay removable). The protected check runs first - the
+ * super-admin role carries no attached permissions and would otherwise read as grantable. */
+const ungrantableRoleNames = computed(() => roles.value
+    .filter(role => !role.protected && (role.permissions ?? []).some(permission => !can(permission.name)))
+    .map(role => role.name))
+
+const ungrantablePermissionNames = computed(() => permissions.value
+    .filter(permission => !can(permission.name))
+    .map(permission => permission.name))
 
 const inheritedPermissions = computed(() => {
     if (!user.value) {
@@ -259,7 +276,8 @@ function closeResetModal () {
  *
  *  Gated on users.impersonate independently of users.manage, so a
  *  view+impersonate support role reaches it without account management.
- *  Tier limits stay server-authoritative - a blocked target answers 422.
+ *  Targets above the impersonation tier hide the control (`impersonable`,
+ *  computed server-side - the server stays authoritative).
  * ------------------------------------------------------------------ */
 
 const impersonateOpen = ref(false)
@@ -269,7 +287,8 @@ const canImpersonate = computed(() =>
     can('users.impersonate')
     && authStore.user?.impersonation_available === true
     && !isDeleted.value
-    && user.value?.id !== authStore.user?.id)
+    && user.value?.id !== authStore.user?.id
+    && user.value?.impersonable !== false)
 
 async function startImpersonation () {
     impersonating.value = true
@@ -541,6 +560,12 @@ async function saveAccess () {
                                 :label="t('messages.access.users.reset_required')"
                                 color="warning"
                                 variant="outline"
+                            />
+                            <UBadge
+                                v-if="!targetManageable"
+                                :label="t('messages.access.users.above_tier')"
+                                color="warning"
+                                variant="subtle"
                             />
                         </div>
                     </div>
@@ -959,6 +984,7 @@ async function saveAccess () {
                                     :available-label="t('messages.access.users.available_roles')"
                                     :assigned-label="t('messages.access.users.assigned_roles')"
                                     :locked-names="protectedRoleNames"
+                                    :ungrantable-names="ungrantableRoleNames"
                                 />
                             </AccessSection>
 
@@ -972,6 +998,7 @@ async function saveAccess () {
                                     :available-label="t('messages.access.users.available_permissions')"
                                     :assigned-label="t('messages.access.users.assigned_permissions')"
                                     :inherited-names="inheritedPermissions"
+                                    :ungrantable-names="ungrantablePermissionNames"
                                 />
                                 <p class="text-xs text-muted mt-2">
                                     {{ t('messages.access.users.transfer_inherited_hint') }}

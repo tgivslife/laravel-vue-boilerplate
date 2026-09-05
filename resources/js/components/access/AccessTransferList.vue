@@ -1,10 +1,8 @@
 <script setup>
 /**
- * Dual-pane transfer list: available items on the left, assigned on the
- * right, each pane independently searchable and client-side paginated.
- * The selection is the array of assigned ids (v-model); items flagged in
- * `inheritedNames` carry an "inherited" badge so admins can tell a direct
- * grant apart from one a role already provides.
+ * Dual-pane transfer list: available items on the left, assigned on the right, each pane independently searchable and client-side paginated.
+ * The selection is the array of assigned ids (v-model); items flagged in `inheritedNames` carry an "inherited" badge so
+ * admins can tell a direct grant apart from one a role already provides.
  */
 
 const props = defineProps({
@@ -14,6 +12,10 @@ const props = defineProps({
     inheritedNames: { type: Array, default: () => [] },
     /** Items that display but cannot be moved (e.g. the super-admin role). */
     lockedNames: { type: Array, default: () => [] },
+    /**
+     * Items above the admin's own grant ceiling: not addable, but - unlike lockedNames - still removable, mirroring the server's added-delta semantics.
+     */
+    ungrantableNames: { type: Array, default: () => [] },
 })
 
 const selected = defineModel({ type: Array, default: () => [] })
@@ -67,6 +69,10 @@ function isInherited (item) {
 function isLocked (item) {
     return props.lockedNames.includes(item.name)
 }
+
+function isUngrantable (item) {
+    return props.ungrantableNames.includes(item.name)
+}
 </script>
 
 <template>
@@ -103,6 +109,13 @@ function isLocked (item) {
                     <UBadge
                         v-if="isLocked(item)"
                         :label="t('messages.access.roles.protected')"
+                        color="warning"
+                        variant="subtle"
+                        size="sm"
+                    />
+                    <UBadge
+                        v-else-if="isUngrantable(item)"
+                        :label="t('messages.access.not_grantable')"
                         color="warning"
                         variant="subtle"
                         size="sm"

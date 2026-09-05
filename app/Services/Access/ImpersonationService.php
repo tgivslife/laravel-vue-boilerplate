@@ -18,8 +18,8 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
  * Both directions of the swap regenerate the session id; the marker is what survives.
  * The target never receives a remember token, so nothing outlives the borrowed session itself.
  *
- * Tier rule (strict): targets holding the super-admin role or any lockout permission may only be impersonated by super admins,
- * becoming a top-tier account requires being top-tier.
+ * Tier rule (strict): targets holding the super-admin role or any privileged permission (AccessScope::isTopTier())
+ * may only be impersonated by super admins, becoming a top-tier account requires being top-tier.
  * Scope dimensions veto out-of-reach targets like every other per-user action, so scoped deployments bound impersonation for free.
  */
 readonly class ImpersonationService
@@ -67,7 +67,7 @@ readonly class ImpersonationService
             ]);
         }
 
-        if ($this->targetAboveActorTier($actor, $target)) {
+        if (!$this->access->isSuperAdmin($actor) && $this->access->isTopTier($target)) {
             throw ValidationException::withMessages([
                 'user' => __('api.access.impersonation_above_tier'),
             ]);
@@ -190,25 +190,6 @@ readonly class ImpersonationService
             && is_int($state['actor_id'] ?? null)
             && is_string($state['started_at'] ?? null)
         ) ? $state : null;
-    }
-
-    /**
-     * Whether the target sits above the actor's tier: the super-admin role or any effective lockout permission puts
-     * an account out of reach of everyone but super admins.
-     */
-    private function targetAboveActorTier(User $actor, User $target): bool
-    {
-        if ($this->access->isSuperAdmin($actor)) {
-            return false;
-        }
-
-        if ($target->hasRole(config('access.super_admin_role'))) {
-            return true;
-        }
-
-        $lockout = (array) config('access.lockout_permissions', []);
-
-        return $lockout !== [] && $target->getAllPermissions()->pluck('name')->intersect($lockout)->isNotEmpty();
     }
 
     /**

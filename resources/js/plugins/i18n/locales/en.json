@@ -415,6 +415,7 @@
         "done": "Done",
         "rows_per_page": "Rows per page",
         "search": "Search…",
+        "not_grantable": "Not grantable",
         "users": {
             "title": "Users",
             "description": "Every account with its roles and directly granted permissions.",
@@ -450,6 +451,7 @@
             "disabled": "Disabled",
             "password_changed": "Password changed",
             "reset_required": "Password reset required",
+            "above_tier": "Above your tier",
             "details": "Details",
             "tab_access": "Access",
             "tab_security": "Security",

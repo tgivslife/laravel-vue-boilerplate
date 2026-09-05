@@ -415,6 +415,7 @@
         "done": "Gata",
         "rows_per_page": "Rânduri pe pagină",
         "search": "Caută…",
+        "not_grantable": "Nu poate fi acordată",
         "users": {
             "title": "Utilizatori",
             "description": "Fiecare cont cu rolurile și permisiunile acordate direct.",
@@ -450,6 +451,7 @@
             "disabled": "Dezactivată",
             "password_changed": "Parola schimbată",
             "reset_required": "Necesită resetarea parolei",
+            "above_tier": "Peste nivelul tău",
             "details": "Detalii",
             "tab_access": "Acces",
             "tab_security": "Securitate",

@@ -59,6 +59,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Privileged permissions
+    |--------------------------------------------------------------------------
+    |
+    | The capabilities that define the administrative tier.
+    | Holding one the acting admin lacks puts an account out of that admin's reach entirely (the target ceiling),
+    | and holding any at all puts it out of impersonation's reach for everyone but super admins.
+    | Deliberately a separate list from lockout_permissions above: that one also drives the last-active-holder invariant,
+    | and listing settings.manage there would mean the last settings admin could never be removed.
+    |
+    */
+
+    'privileged_permissions' => ['users.manage', 'roles.manage', 'settings.manage', 'users.impersonate'],
+
+    /*
+    |--------------------------------------------------------------------------
     | Capability vocabulary
     |--------------------------------------------------------------------------
     |
@@ -159,7 +174,7 @@ return [
     | The way out honors an existing session marker regardless, so flipping this off never strands a live impersonation
     | without an exit (or its ended audit entry).
     | The users.impersonate permission is seeded regardless, so a role composed with it simply lies dormant until a deployment flips this on.
-    | Targets above the actor's tier (super admins, lockout-permission holders) are refused unless the actor is a super admin;
+    | Targets above the actor's tier (super admins, privileged-permission holders) are refused unless the actor is a super admin;
     | scope dimensions bound reach like every other per-user action.
     |
     */

@@ -32,6 +32,12 @@ const newName = ref('')
 const selectedPermissionIds = ref([])
 const creating = ref(false)
 
+/* Permissions above the signed-in admin's own ceiling: the server refuses adding them to a
+ * role, so the picker locks them for adding. */
+const ungrantablePermissionNames = computed(() => permissions.value
+    .filter(permission => !can(permission.name))
+    .map(permission => permission.name))
+
 /* Skeleton over an empty transfer list while the dictionary is on the wire. */
 const permissionsLoading = ref(true)
 
@@ -174,6 +180,7 @@ async function createRole () {
                             :items="permissions"
                             :available-label="t('messages.access.roles.available_permissions')"
                             :assigned-label="t('messages.access.roles.assigned_permissions')"
+                            :ungrantable-names="ungrantablePermissionNames"
                         />
                     </AccessSection>
 

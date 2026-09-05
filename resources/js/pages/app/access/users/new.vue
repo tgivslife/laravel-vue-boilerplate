@@ -100,6 +100,12 @@ const protectedRoleNames = computed(() => roles.value
     .filter(role => role.protected)
     .map(role => role.name))
 
+/* Roles carrying a permission above the creator's own ceiling are refused by the server;
+ * the protected check runs first (the super-admin role carries no attached permissions). */
+const ungrantableRoleNames = computed(() => roles.value
+    .filter(role => !role.protected && (role.permissions ?? []).some(permission => !can(permission.name)))
+    .map(role => role.name))
+
 const formComplete = computed(() => form.first_name.trim() !== ''
     && form.last_name.trim() !== ''
     && form.email.trim() !== '')
@@ -343,6 +349,7 @@ const bannerName = computed(() => [form.first_name.trim(), form.last_name.trim()
                             :available-label="t('messages.access.users.available_roles')"
                             :assigned-label="t('messages.access.users.assigned_roles')"
                             :locked-names="protectedRoleNames"
+                            :ungrantable-names="ungrantableRoleNames"
                         />
                     </AccessSection>
 

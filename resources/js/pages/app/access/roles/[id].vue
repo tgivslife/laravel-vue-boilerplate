@@ -40,6 +40,12 @@ const permissions = ref([])
 
 const canManage = computed(() => can('roles.manage') && !role.value?.protected)
 
+/* Permissions above the signed-in admin's own ceiling: the server refuses adding them to a
+ * role, so the picker locks them for adding (they stay removable). */
+const ungrantablePermissionNames = computed(() => permissions.value
+    .filter(permission => !can(permission.name))
+    .map(permission => permission.name))
+
 /* Editable state, re-synced from the server after every mutation. */
 const editedName = ref('')
 const selectedPermissionIds = ref([])
@@ -388,6 +394,7 @@ async function savePermissions () {
                                     :items="permissions"
                                     :available-label="t('messages.access.roles.available_permissions')"
                                     :assigned-label="t('messages.access.roles.assigned_permissions')"
+                                    :ungrantable-names="ungrantablePermissionNames"
                                 />
                             </AccessSection>
 
