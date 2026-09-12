@@ -2,8 +2,10 @@
 
 namespace Tests\Feature\Access;
 
+use App\Http\Middleware\EnsureUserCanAuthenticate;
 use App\Models\User;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Password;
 use Tests\Support\UserAllowlistDimension;
 
 class ImpersonationTest extends AccessTestCase
@@ -387,7 +389,8 @@ class ImpersonationTest extends AccessTestCase
         $this->refreshGuards();
         $actor->delete();
 
-        $this->deleteJson('/api/impersonation')->assertOk();
+        // The per-request cutoff tears the session down before stop() is reached; same teardown, same invariant.
+        $this->deleteJson('/api/impersonation')->assertUnauthorized();
 
         $this->assertNull($log->refresh()->logout_at);
     }
@@ -406,6 +409,12 @@ class ImpersonationTest extends AccessTestCase
             ->assertJsonPath('data.impersonation', null);
 
         $this->withSession(['impersonation' => ['started_at' => 'x']])
+            ->getJson('/api/user')
+            ->assertOk()
+            ->assertJsonPath('data.impersonation', null);
+
+        // A marker without the actor's credential pin is malformed too.
+        $this->withSession(['impersonation' => ['actor_id' => 1, 'started_at' => 'x']])
             ->getJson('/api/user')
             ->assertOk()
             ->assertJsonPath('data.impersonation', null);
@@ -493,7 +502,9 @@ class ImpersonationTest extends AccessTestCase
         $this->refreshGuards();
         $actor->delete();
 
-        $this->deleteJson('/api/impersonation')
+        // Reach stop() directly: the per-request cutoff would otherwise answer first.
+        $this->withoutMiddleware(EnsureUserCanAuthenticate::class)
+            ->deleteJson('/api/impersonation')
             ->assertOk()
             ->assertJsonPath('data', null);
         $this->refreshGuards();
@@ -505,5 +516,167 @@ class ImpersonationTest extends AccessTestCase
             'actor_id' => $actor->id,
             'subject_id' => $target->id,
         ]);
+    }
+
+    /**
+     * The borrowed session is the admin's browser: it is filed under them in the session registry, so
+     * their revocations reach it and the target's session list never shows a device that is not theirs.
+     */
+    public function test_the_borrowed_session_is_registered_under_the_actor(): void
+    {
+        $actor = $this->actingAsImpersonator();
+        $target = $this->createUser();
+
+        $this->postJson("/api/access/users/{$target->id}/impersonate")->assertOk();
+
+        $this->assertDatabaseHas('user_sessions', [
+            'session_id' => $this->currentSessionId(),
+            'user_id' => $actor->id,
+        ]);
+        $this->assertDatabaseMissing('user_sessions', ['user_id' => $target->id]);
+    }
+
+    /**
+     * Account recovery on the admin must not spare a session that answers as someone else: the reset
+     * destroys the borrowed session outright, and a request on its cookie is cut off with the ended audit.
+     */
+    public function test_password_recovery_on_the_actor_destroys_the_borrowed_session(): void
+    {
+        Notification::fake();
+
+        $actor = $this->actingAsImpersonator();
+        $target = $this->createUser();
+
+        $this->postJson("/api/access/users/{$target->id}/impersonate")->assertOk();
+        $this->refreshGuards();
+        $borrowedSessionId = $this->currentSessionId();
+
+        $this->postJson('/api/password/reset', [
+            'token' => Password::broker()->createToken($actor),
+            'email' => $actor->email,
+            'password' => 'Recovered-Passw0rd!',
+            'password_confirmation' => 'Recovered-Passw0rd!',
+        ])->assertOk();
+
+        $this->assertFalse($this->sessionExists($borrowedSessionId));
+        $this->assertDatabaseMissing('user_sessions', ['session_id' => $borrowedSessionId]);
+
+        // Belt and braces: a copy of the session the registry missed is refused on its pin.
+        $this->refreshGuards();
+        $this->getJson('/api/user')->assertUnauthorized();
+
+        $this->assertDatabaseHas('access_audit_logs', [
+            'action' => 'user.impersonation_ended',
+            'actor_id' => $actor->id,
+            'subject_id' => $target->id,
+        ]);
+    }
+
+    public function test_the_actors_other_sessions_revocation_reaches_the_borrowed_session(): void
+    {
+        $actor = $this->actingAsImpersonator();
+        $target = $this->createUser();
+
+        $this->postJson("/api/access/users/{$target->id}/impersonate")->assertOk();
+        $borrowedSessionId = $this->currentSessionId();
+
+        // The admin, back on a session of their own, signs out everything else.
+        $this->flushSession();
+        $this->refreshGuards();
+        $this->actingAsStateful($actor);
+        $this->refreshGuards();
+
+        $this->deleteJson('/api/sessions/others', ['password' => 'password'])->assertOk();
+
+        $this->assertFalse($this->sessionExists($borrowedSessionId));
+        $this->assertDatabaseMissing('user_sessions', ['session_id' => $borrowedSessionId]);
+    }
+
+    /**
+     * The marker pins the actor's credentials at swap time; stop() refuses to restore an actor whose
+     * password has changed since, even when the session escaped every revocation.
+     */
+    public function test_stop_destroys_the_session_when_the_actors_password_changed(): void
+    {
+        $actor = $this->actingAsImpersonator();
+        $target = $this->createUser();
+
+        $this->postJson("/api/access/users/{$target->id}/impersonate")->assertOk();
+        $this->refreshGuards();
+
+        $actor->forceFill(['password' => 'Changed-Passw0rd!'])->save();
+
+        // Reach stop() directly: the per-request cutoff would otherwise answer first.
+        $this->withoutMiddleware(EnsureUserCanAuthenticate::class)
+            ->deleteJson('/api/impersonation')
+            ->assertOk()
+            ->assertJsonPath('data', null);
+        $this->refreshGuards();
+
+        $this->getJson('/api/user')->assertUnauthorized();
+
+        $this->assertDatabaseHas('access_audit_logs', [
+            'action' => 'user.impersonation_ended',
+            'actor_id' => $actor->id,
+            'subject_id' => $target->id,
+        ]);
+    }
+
+    /**
+     * An actor retired mid-impersonation cannot keep acting as the target until they choose to stop:
+     * the next request tears the borrowed session down, ended audit included.
+     */
+    public function test_an_actor_deactivated_mid_impersonation_takes_the_session_down(): void
+    {
+        $actor = $this->actingAsImpersonator();
+        $target = $this->createUser();
+
+        $this->postJson("/api/access/users/{$target->id}/impersonate")->assertOk();
+        $this->refreshGuards();
+
+        $actor->forceFill(['is_active' => false])->save();
+
+        $this->getJson('/api/user')->assertUnauthorized();
+        $this->refreshGuards();
+
+        $this->getJson('/api/user')->assertUnauthorized();
+
+        $this->assertDatabaseHas('access_audit_logs', [
+            'action' => 'user.impersonation_ended',
+            'actor_id' => $actor->id,
+            'subject_id' => $target->id,
+        ]);
+    }
+
+    /**
+     * The target's own password change flushes the borrowed session through Sanctum's password pin,
+     * before any controller runs; the audit window must still be closed on the way out.
+     */
+    public function test_the_targets_password_change_ends_the_impersonation_with_its_audit(): void
+    {
+        $actor = $this->actingAsImpersonator();
+        $target = $this->createUser();
+
+        $this->postJson("/api/access/users/{$target->id}/impersonate")->assertOk();
+        $this->refreshGuards();
+
+        $target->forceFill(['password' => 'Changed-Passw0rd!'])->save();
+
+        $this->getJson('/api/user')->assertUnauthorized();
+
+        $this->assertDatabaseHas('access_audit_logs', [
+            'action' => 'user.impersonation_ended',
+            'actor_id' => $actor->id,
+            'subject_id' => $target->id,
+        ]);
+    }
+
+    /**
+     * The id the test client's session ended the last request with. Requests carry no cookie, so
+     * this is the only handle on the session that was just written.
+     */
+    private function currentSessionId(): string
+    {
+        return $this->app['session']->driver()->getId();
     }
 }

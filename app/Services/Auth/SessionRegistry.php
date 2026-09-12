@@ -3,6 +3,7 @@
 namespace App\Services\Auth;
 
 use App\Models\User;
+use App\Services\Access\ImpersonationService;
 use Illuminate\Cache\RedisStore;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\Request;
@@ -17,18 +18,14 @@ use SessionHandlerInterface;
 /**
  * App-owned index of which sessions belong to which user.
  *
- * The sessions are stored as opaque records with no user index (redis cannot be enumerated per user), so every
- * feature that lists or revokes a user's sessions goes through this registry instead of the driver's storage.
- * Rows are written by {@see \App\Http\Middleware\RecordSessionActivity} on authenticated requests,
- * removed on logout and revocation, pruned lazily on read when their underlying session no longer exists,
- * and swept by auth:purge-session-registry once they outlive the session lifetime.
- *
- * Revocation always destroys the real session through the configured driver's handler,
- * so it works identically on database, redis, or any other backend.
+ * Session drivers store opaque records with no per-user index, so listing and revoking a user's sessions goes through this registry.
+ * Rows are written by RecordSessionActivity on authenticated requests (a borrowed session under the impersonating admin),
+ * removed on logout and revocation, pruned on read when the session is gone, and swept by auth:purge-session-registry past the session lifetime.
+ * Revocation destroys the real session through the driver's handler, so it behaves the same on every backend.
  */
 readonly class SessionRegistry
 {
-    public function __construct(protected SessionManager $sessions)
+    public function __construct(protected SessionManager $sessions, protected ImpersonationService $impersonation)
     {
     }
 
@@ -36,8 +33,7 @@ readonly class SessionRegistry
      * Minutes of registry inactivity after which a row is guaranteed dead.
      *
      * A session cannot outlive `session.lifetime` minutes of inactivity, and a live session's registry row is refreshed
-     * at least every `touch_minutes` - so a row untouched for the two combined cannot belong to a live session and
-     * may be deleted without consulting the driver.
+     * at least every `touch_minutes` - so a row untouched for the two combined cannot belong to a live session and may be deleted without consulting the driver.
      */
     public static function staleMinutes(): int
     {
@@ -53,15 +49,9 @@ readonly class SessionRegistry
      */
     public function record(Request $request): void
     {
-        /*
-         * Resolved through the session (web) guard, not the request's default sanctum guard;
-         * sanctum's RequestGuard caches the user it authenticated with and keeps returning it after logout() or
-         * account deletion, which would re-register the fresh guest session under the departed user.
-         * The web guard reflects in-request logouts, so only sessions that END the request authenticated are recorded.
-         */
-        $user = $request->user('web');
+        $ownerId = $this->ownerId($request);
 
-        if ($user === null || !$request->hasSession()) {
+        if ($ownerId === null) {
             return;
         }
 
@@ -73,7 +63,7 @@ readonly class SessionRegistry
 
         if ($existing === null) {
             $this->table()->insert([
-                'user_id' => $user->getAuthIdentifier(),
+                'user_id' => $ownerId,
                 'session_id' => $sessionId,
                 'ip_address' => $request->ip(),
                 'user_agent' => $request->userAgent(),
@@ -96,8 +86,24 @@ readonly class SessionRegistry
     }
 
     /**
-     * Drop a session's registry row without touching the session itself
-     * (used on logout, where the framework already invalidates it).
+     * Whose session the current request's is, or null when it should not be recorded.
+     *
+     * Resolved through the web guard, which reflects in-request logouts; sanctum's guard keeps returning the user it
+     * authenticated and would re-register the fresh guest session under them. A borrowed session (impersonation)
+     * answers as the target but is the admin's browser, so it is filed under the admin and their revocations reach it.
+     */
+    private function ownerId(Request $request): int|string|null
+    {
+        if (!$request->hasSession() || $request->user('web') === null) {
+            return null;
+        }
+
+        return $this->impersonation->state($request)['actor_id']
+            ?? $request->user('web')->getAuthIdentifier();
+    }
+
+    /**
+     * Drop a session's registry row without touching the session itself (used on logout, where the framework already invalidates it).
      */
     public function forget(string $sessionId): void
     {
@@ -142,10 +148,9 @@ readonly class SessionRegistry
     /**
      * Which of the given session ids still exist in the session store, as a set.
      *
-     * Existence is all the registry needs, so the redis and database backends are checked in a single round trip
-     * (pipelined EXISTS / one whereIn) with no payload transfer; other drivers fall back to reading each session through the handler.
-     * A Redis Cluster cannot route one pipeline across hash slots, so there the EXISTS calls go out one by one,
-     * bounded per user by the registry's own row pruning, so the extra round trips stay small.
+     * Redis and database backends answer in one round trip (pipelined EXISTS / one whereIn) with no payload transfer;
+     * other drivers read each session through the handler. A Redis Cluster cannot route one pipeline across hash slots,
+     * so there the EXISTS calls go out one by one, kept few by the registry's own row pruning.
      *
      * @param  Collection<int, mixed>  $sessionIds
      * @return array<string, int|true>

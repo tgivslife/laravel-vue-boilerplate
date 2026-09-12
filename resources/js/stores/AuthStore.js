@@ -227,9 +227,8 @@ export const useAuthStore = defineStore('auth', {
         },
 
         /**
-         * End the current impersonation. Restores the original admin from the response, or clears
-         * the session when the admin could not be restored (retired mid-impersonation), leaving the
-         * caller to route to login.
+         * End the current impersonation. Restores the admin from the response, or clears the session
+         * on the null fallback; a retired admin usually surfaces as a 401 thrown by the request instead.
          *
          * @returns {Promise<{restored: boolean}>} Whether an admin session was restored.
          */

@@ -14,13 +14,10 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Admin impersonation: enter a user's account, leave it again.
  *
- * start() sits with the access administration (session-only, users.impersonate);
- * stop() is routed as an escape hatch outside the forced-reset and two-factor gates, because mid-impersonation the
- * authenticated user is the target - who may be trapped by those gates and does not hold the permission.
- *
- * Only start() is gated by the feature switch: with it off the door in does not exist (404), but a session marker is
- * proof the feature was on when the swap happened, so the way out honors it regardless, flipping the switch off never
- * strands a live impersonation.
+ * store() sits with the access administration (session-only, users.impersonate, behind the feature switch).
+ * destroy() is an escape hatch outside that group, the forced-reset and two-factor gates, and the switch: mid-impersonation
+ * the authenticated user is the target, who holds no permission and may be trapped by those gates, and the session marker
+ * is proof the feature was on when the swap happened - flipping it off never strands a live impersonation.
  */
 class ImpersonationController extends Controller
 {
@@ -45,9 +42,10 @@ class ImpersonationController extends Controller
     }
 
     /**
-     * End the swap. Returns the restored actor's bootstrap payload, or null user data when the
-     * actor could not be restored (deactivated, banned or deleted mid-impersonation) and the
-     * session was destroyed instead.
+     * End the swap and return the restored actor's bootstrap payload.
+     *
+     * An actor retired or with changed credentials is cut off by EnsureUserCanAuthenticate before this runs, so such a session answers 401 here.
+     * The null payload for an unrestorable actor is the service's own defense in depth, reachable only if the cutoff did not run first.
      */
     public function destroy(Request $request): JsonResponse
     {

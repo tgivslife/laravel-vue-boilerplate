@@ -61,8 +61,11 @@ the rules. How the layers compose, a scoped-role walkthrough and the performance
   reset, two-factor reset (owner notified by mail), delete (see [account-lifecycle.md](account-lifecycle.md)); per-user
   session list and authentication log. When impersonation is enabled, `users.impersonate` holders can sign in as a user
   (session swap with a persistent banner and exit path; access administration, token and credential surfaces - including
-  connecting new sign-in identities - are blocked for the borrowed session). Targets above the actor's tier - super
-  admins and privileged-permission holders - are refused unless the actor is a super admin. Deleted accounts stay reachable
+  connecting new sign-in identities - are blocked for the borrowed session). The borrowed session stays the admin's: the
+  session registry files it under them, so their password recovery, forced reset and "sign out other sessions" destroy
+  it, and the marker pins their credentials at swap time - an admin retired or whose password changed is cut off on the
+  next request, and never restored on stop. Targets above the actor's tier - super admins and privileged-permission
+  holders - are refused unless the actor is a super admin. Deleted accounts stay reachable
   read-only: a `deleted` status filter, a read-only detail view, and a membership lookup by original email; audit-trail
   actors keep their names after their own deletion, flagged as deleted.
 - **Roles**: create, rename, delete (never the super-admin role), permission sync.
@@ -80,9 +83,9 @@ into an account, no matter who performed them":
   `user.two_factor_reset`, `user.deleted`, `role.created`, `role.renamed`, `role.deleted`,
   `role.permissions_synced`, `rules.class_synced`, `rules.record_synced`; impersonation brackets its borrowed-identity
   window with `user.impersonation_started` / `user.impersonation_ended`. Every exit path writes the `ended` entry -
-  explicit stop, logout, even a mid-flight cutoff - but the marker lives in the session, so a `started` without a
-  matching `ended` means the borrowed session was destroyed out-of-band (target deleted, forced reset, expiry), not that
-  anything was concealed.
+  explicit stop, logout, a mid-flight cutoff of either party, the target's own password change flushing the session -
+  but the marker lives in the session, so a `started` without a matching `ended` means the borrowed session was
+  destroyed out-of-band (the admin's password recovery, session revocation, expiry), not that anything was concealed.
 - **Self-service security events**, with the account owner as actor: `user.two_factor_enabled`,
   `user.two_factor_disabled`, `user.identity_linked`, `user.identity_unlinked`,
   `user.self_provisioned`, `user.self_deleted`, `user.password_changed`.

@@ -3,6 +3,7 @@
 namespace Tests\Feature\Auth;
 
 use App\Models\User;
+use App\Services\Access\ImpersonationService;
 use App\Services\Auth\SessionRegistry;
 use Illuminate\Cache\RedisStore;
 use Illuminate\Contracts\Cache\Repository;
@@ -17,11 +18,9 @@ use Mockery;
 use Tests\TestCase;
 
 /**
- * The redis liveness check inside SessionRegistry::forUser(): a standalone
- * connection batches every EXISTS into one pipeline, while a cluster
- * connection must issue them one by one (a pipeline cannot be routed across
- * hash slots). The suite runs on the array session driver, so the redis
- * branches are exercised here through mocked stores.
+ * The redis liveness check inside SessionRegistry::forUser(): a standalone connection batches every EXISTS into one pipeline,
+ * while a cluster connection must issue them one by one (a pipeline cannot be routed across hash slots).
+ * The suite runs on the array session driver, so the redis branches are exercised here through mocked stores.
  */
 class SessionRegistryLivenessTest extends TestCase
 {
@@ -48,7 +47,7 @@ class SessionRegistryLivenessTest extends TestCase
         $sessions = Mockery::mock(SessionManager::class);
         $sessions->shouldReceive('driver')->andReturn($driver);
 
-        return new SessionRegistry($sessions);
+        return new SessionRegistry($sessions, app(ImpersonationService::class));
     }
 
     private function registerSession(User $user, string $sessionId, int $minutesAgo): void

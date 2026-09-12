@@ -3,41 +3,40 @@
 namespace App\Services\Access;
 
 use App\Models\User;
+use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
+use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 /**
  * Signing in as another account: a same-session identity swap, bracketed by audit entries.
  *
- * The borrowed session carries a marker (actor id + start time) that the resource layer reads for the banner and
- * EnsureNotImpersonating reads to keep access administration, token and credential surfaces closed while identity is borrowed.
- * Both directions of the swap regenerate the session id; the marker is what survives.
- * The target never receives a remember token, so nothing outlives the borrowed session itself.
+ * The borrowed session carries a marker (actor id, start time, the actor's credential pin): the resource layer reads it
+ * for the banner, EnsureNotImpersonating to keep access administration, token and credential surfaces closed.
+ * Both directions of the swap regenerate the session id; the marker is what survives, and the target never receives
+ * a remember token, so nothing outlives the borrowed session itself.
  *
- * Tier rule (strict): targets holding the super-admin role or any privileged permission (AccessScope::isTopTier())
- * may only be impersonated by super admins, becoming a top-tier account requires being top-tier.
- * Scope dimensions veto out-of-reach targets like every other per-user action, so scoped deployments bound impersonation for free.
+ * The session remains the actor's: the registry files it under them, so their own revocations destroy it, and the pin is
+ * checked on every request and on stop, so it cannot outlive the credentials that opened it. Sanctum's pin covers the target.
+ *
+ * Tier rule (strict): top-tier targets (AccessScope::isTopTier()) may only be impersonated by super admins.
+ * Scope dimensions veto out-of-reach targets like every other per-user action.
  */
 readonly class ImpersonationService
 {
     /**
-     * Request attribute marking an in-flight identity swap.
-     * The authentication-log listeners bail on it: guard-level Login/Logout events fired by a swap are bookkeeping,
-     * not the account owner signing in - recording them would pollute the target's login history with the admin's
-     * device and mail them a new-device alert.
+     * Request attribute marking an in-flight identity swap, so the login/logout listeners treat the guard events as bookkeeping, not the owner signing in.
      */
     public const string SWAP_ATTRIBUTE = 'impersonation.swap';
 
     private const string SESSION_KEY = 'impersonation';
 
-    public function __construct(
-        private AccessScope $access,
-        private AccessAuditor $auditor,
-    ) {
+    public function __construct(private AccessScope $access, private AccessAuditor $auditor)
+    {
     }
 
     /**
@@ -84,14 +83,15 @@ readonly class ImpersonationService
         $request->session()->put(self::SESSION_KEY, [
             'actor_id' => (int) $actor->getKey(),
             'started_at' => now()->toIso8601String(),
+            'actor_password_hash' => $this->credentialPin($actor),
         ]);
     }
 
     /**
      * End the swap and restore the actor.
      *
-     * The actor is re-resolved strictly: an admin deactivated, banned or deleted mid-impersonation is not restored,
-     * the session is destroyed outright, leaving no one signed in.
+     * The actor is re-resolved strictly: an admin deactivated, banned or deleted mid-impersonation, or whose password
+     * changed since the swap, is not restored - the session is destroyed outright, leaving no one signed in.
      */
     public function stop(Request $request): ?User
     {
@@ -103,14 +103,13 @@ readonly class ImpersonationService
             ]);
         }
 
-        /** @var User|null $actor */
-        $actor = User::withTrashed()->find($state['actor_id']);
+        $actor = $this->actor($state);
 
         $this->auditEnd($actor, $request->user());
 
         $request->session()->forget(self::SESSION_KEY);
 
-        if ($actor === null || $actor->trashed() || !$actor->canAuthenticate()) {
+        if (!$this->vouches($actor, $state)) {
             $this->destroySession($request);
 
             return null;
@@ -122,11 +121,47 @@ readonly class ImpersonationService
     }
 
     /**
-     * Tear down a borrowed session as part of a full sign-out - a logout request, or the
-     * mid-impersonation ineligibility cutoff (EnsureUserCanAuthenticate). The audit window is
-     * closed with its ended entry before the session is destroyed, so no impersonation ever ends
-     * without a trace.
-     *
+     * Tear down a borrowed session whose actor was retired or re-credentialed since the swap, ended entry first.
+     * Run on every authenticated request. Returns true when torn down, false when not impersonating or the actor still vouches.
+     */
+    public function cutOffUnvouchedActor(Request $request): bool
+    {
+        $state = $this->state($request);
+
+        if ($state === null) {
+            return false;
+        }
+
+        $actor = $this->actor($state);
+
+        if ($this->vouches($actor, $state)) {
+            return false;
+        }
+
+        $this->tearDown($actor, $request);
+
+        return true;
+    }
+
+    /**
+     * Write the ended entry and drop the marker for a borrowed session being torn down outside this service
+     * (Sanctum's password pin, after the target's own password changed). The caller destroys the session.
+     */
+    public function closeWindow(Request $request, ?Authenticatable $target): void
+    {
+        $state = $this->state($request);
+
+        if ($state === null) {
+            return;
+        }
+
+        $this->auditEnd($this->actor($state), $target);
+
+        $request->session()->forget(self::SESSION_KEY);
+    }
+
+    /**
+     * Tear down a borrowed session on a full sign-out (logout request, or the target's ineligibility cutoff), ended entry first.
      * Returns false when the session is not impersonating: the caller performs its ordinary logout.
      */
     public function abandon(Request $request): bool
@@ -137,12 +172,63 @@ readonly class ImpersonationService
             return false;
         }
 
-        $this->auditEnd(User::withTrashed()->find($state['actor_id']), $request->user());
+        $this->tearDown($this->actor($state), $request);
+
+        return true;
+    }
+
+    /**
+     * Close the audit window, drop the marker and destroy the borrowed session, in that order.
+     */
+    private function tearDown(?User $actor, Request $request): void
+    {
+        $this->auditEnd($actor, $request->user());
 
         $request->session()->forget(self::SESSION_KEY);
         $this->destroySession($request);
+    }
 
-        return true;
+    /**
+     * The marker's actor, tombstones included so the ended entry can still name them.
+     *
+     * @param  array{actor_id: int, started_at: string, actor_password_hash: string}  $state
+     */
+    private function actor(array $state): ?User
+    {
+        /** @var User|null $actor */
+        $actor = User::withTrashed()->find($state['actor_id']);
+
+        return $actor;
+    }
+
+    /**
+     * Whether the actor may still be restored: alive, eligible, and holding the credentials the swap was opened with.
+     *
+     * @param  array{actor_id: int, started_at: string, actor_password_hash: string}  $state
+     */
+    private function vouches(?User $actor, array $state): bool
+    {
+        return $actor !== null
+            && !$actor->trashed()
+            && $actor->canAuthenticate()
+            && hash_equals($state['actor_password_hash'], $this->credentialPin($actor));
+    }
+
+    /**
+     * The user's credential version, keyed the way Sanctum's AuthenticateSession pins the current identity,
+     * so the session never holds a raw password hash. Any password change - self-service, forced, recovery - rotates it.
+     *
+     * @throws RuntimeException When the web guard is not a session guard.
+     */
+    private function credentialPin(User $user): string
+    {
+        $guard = Auth::guard('web');
+
+        if (!$guard instanceof SessionGuard) {
+            throw new RuntimeException('Impersonation requires the web guard to be a session guard.');
+        }
+
+        return $guard->hashPasswordForCookie((string) $user->getAuthPassword());
     }
 
     /**
@@ -158,10 +244,9 @@ readonly class ImpersonationService
     /**
      * Destroy the borrowed session outright, leaving no one signed in.
      *
-     * logoutCurrentDevice() rather than logout(): the current user is the impersonation target, and a full logout
-     * would cycle their remember token, silently signing the target out of their own remembered devices.
-     * The borrowed session never held a remember cookie, so invalidation alone kills it.
-     * It also fires CurrentDeviceLogout instead of Logout, keeping the target's authentication log untouched; SWAP_ATTRIBUTE guards future listeners.
+     * logoutCurrentDevice() rather than logout(): a full logout would cycle the target's remember token and sign them out
+     * of their own devices, and the borrowed session never held a remember cookie anyway.
+     * SWAP_ATTRIBUTE tells the logout listeners this teardown is bookkeeping, already audited.
      */
     private function destroySession(Request $request): void
     {
@@ -175,7 +260,7 @@ readonly class ImpersonationService
     /**
      * The session's impersonation marker, if identity is currently borrowed.
      *
-     * @return array{actor_id: int, started_at: string}|null
+     * @return array{actor_id: int, started_at: string, actor_password_hash: string}|null
      */
     public function state(Request $request): ?array
     {
@@ -191,18 +276,16 @@ readonly class ImpersonationService
             is_array($state)
             && is_int($state['actor_id'] ?? null)
             && is_string($state['started_at'] ?? null)
+            && is_string($state['actor_password_hash'] ?? null)
         ) ? $state : null;
     }
 
     /**
      * Sign the session in as the given user.
      *
-     * Drops auth state that must not cross identities: password confirmations ('auth') and the per-guard password-hash pins,
-     * Sanctum's AuthenticateSession compares the pinned hash against the resolved user and would flush the swapped session as a takeover.
-     * Forgetting the pin lets it re-pin the new identity on the next request.
-     *
-     * The swap is invisible to the authentication log (SWAP_ATTRIBUTE): nobody signed in, an already-authenticated
-     * session changed hands - the audit trail is the record of that.
+     * Drops auth state that must not cross identities: password confirmations and the per-guard password-hash pins,
+     * which Sanctum would otherwise read as a takeover and flush; it re-pins the new identity on the next request.
+     * SWAP_ATTRIBUTE keeps the swap out of the authentication log - the audit trail is the record of it.
      */
     private function swapTo(User $user, Request $request): void
     {

@@ -29,9 +29,7 @@ export function useUserMenuItems (fullName) {
                 router.push('/auth/login')
             }
         } catch (error) {
-            /* A 401/403 means the borrowed session is already gone server-side (e.g. the target
-             * was deactivated and the cutoff destroyed it): that is an ended impersonation, not a
-             * failed exit. */
+            // A 401/403 means the cutoff already destroyed the borrowed session: an ended impersonation, not a failed exit.
             if (error.status === 401 || error.status === 403) {
                 authStore.clearSession()
                 toast.add({

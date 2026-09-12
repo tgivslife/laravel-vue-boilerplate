@@ -113,7 +113,8 @@ typed email, for account deletion).
 ## Sessions
 
 An app-owned session registry records which sessions belong to which user (session drivers store sessions as opaque
-records with no per-user index). It powers the settings page's session list and
+records with no per-user index); a session borrowed through admin impersonation belongs to the admin, not the target.
+It powers the settings page's session list and
 "sign out other sessions", and the per-user session list in the admin UI. Stale rows are pruned lazily on read and swept
 by `auth:purge-session-registry`.
 

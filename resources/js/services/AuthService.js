@@ -77,9 +77,8 @@ export default class AuthService extends HttpClient {
     }
 
     /**
-     * End the current impersonation and restore the original admin. The response carries the
-     * restored admin's user resource, or a null `user` when the admin could no longer be restored
-     * (deactivated, banned or deleted mid-impersonation) and the session was destroyed instead.
+     * End the current impersonation.
+     * The response carries the restored admin's user resource; an admin who can no longer be restored answers 401 (or, as a fallback, a null payload).
      */
     stopImpersonation () {
         return this.delete('/api/impersonation')
