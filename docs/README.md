@@ -9,7 +9,7 @@ Each document covers one domain: what is implemented and, next to every feature,
 | [account-lifecycle.md](account-lifecycle.md) | How accounts come to exist (admin-created, self-provisioned) and how they end (inactivity closure, retirement, email tombstoning, membership lookups) |
 | [access-control.md](access-control.md)       | RBAC, the super-admin and privileged tiers, grant and target ceilings, lockout invariants, required-permission rules, the admin surface, the audit trails |
 | [record-scoping.md](record-scoping.md)       | How record-level access composes: scope dimensions, required-permission rules, building a scoped role, performance                        |
-| [hardening.md](hardening.md)                 | Transport security, response security headers, rate limiting, platform conventions, scheduled hygiene                                     |
+| [hardening.md](hardening.md)                 | Transport security, response security headers, rate limiting, the auth decision floor, platform conventions, scheduled hygiene                                     |
 | [deployment.md](deployment.md)               | The container image, startup sequence, environment matrix, health probes, the first-deploy runbook                                        |
 | [redis.md](redis.md)                         | The three Redis topologies, the sentinel driver's reliability model, queue semantics under failover, the dev HA stack and drill           |
 

@@ -12,9 +12,11 @@ from a hardened baseline instead of a blank slate.
 **Highlights**
 
 * **Authentication:** passwords, magic links, TOTP two-factor, OIDC single sign-on (any issuer), personal access
-  tokens, per-credential lockout and per-IP throttling, enumeration-resistant endpoints
+  tokens, per-credential lockout and per-IP throttling, enumeration-resistant endpoints that answer in equal time,
+  single-use two-factor codes and sessions that stay revoked on any driver
 * **Access control:** deny-by-default RBAC with roles/permissions admin, privilege tiers with grant and target
-  ceilings, record-level scoping and required permissions, impersonation, inactive-account auto-closure, and
+  ceilings read under the mutation lock, record-level scoping and required permissions, impersonation held to its
+  admin's credentials, inactive-account auto-closure, a last-holder invariant on every retirement door, and
   administrative audit trails for users and roles
 * **Self-service settings:** profile, preferences, active sessions, connected identities, authentication log
 * **Operations:** Horizon queues, Redis standalone/cluster/sentinel topologies with failover retries, an owned `/up`
@@ -23,7 +25,7 @@ from a hardened baseline instead of a blank slate.
 
 ## ⚙️ Stack / Tools
 
-* **Backend:** Laravel 13 (PHP 8.3+)
+* **Backend:** Laravel 13 (PHP 8.5+)
 * **Frontend:** Vue.js 3, Nuxt UI
 * **Database:** PostgreSQL
 * **Caching/State:** Redis
