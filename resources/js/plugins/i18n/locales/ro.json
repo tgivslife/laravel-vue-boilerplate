@@ -90,6 +90,9 @@
         "captcha_unavailable": "Componenta de verificare nu a putut fi încărcată. Reîncarcă pagina pentru a încerca din nou.",
         "session_expired_title": "Sesiune încheiată",
         "session_expired_description": "Sesiunea ta a expirat. Autentifică-te din nou pentru a continua de unde ai rămas.",
+        "logout": {
+            "failed": "Deconectarea nu a reușit"
+        },
         "magic_link": {
             "label": "Magic link",
             "send": "Trimite Magic Link",

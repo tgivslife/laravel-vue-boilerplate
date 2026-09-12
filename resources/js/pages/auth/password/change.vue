@@ -24,6 +24,7 @@ const locales = computed(() => availableLocales.map(l => ({
 const toast = useAppToast()
 const authStore = useAuthStore()
 const router = useRouter()
+const { logout: onLogout } = useLogout()
 
 const settingsService = new SettingsService()
 
@@ -93,10 +94,6 @@ async function onSubmit () {
     }
 }
 
-async function onLogout () {
-    await authStore.logout()
-    await router.push('/auth/login')
-}
 </script>
 
 <template>

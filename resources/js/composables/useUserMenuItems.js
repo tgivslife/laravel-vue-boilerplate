@@ -7,9 +7,9 @@ export function useUserMenuItems (fullName) {
     const router = useRouter()
     const toast = useAppToast()
     const colorMode = useColorMode()
+    const { logout } = useLogout()
 
-    /* Ends the borrowed session: restores the admin (routing back to the users panel), or clears
-     * everything and lands on login when the admin could not be restored mid-impersonation. */
+    // Ends the borrowed session: back to the users panel as the admin, or to login when the admin could not be restored.
     async function exitImpersonation () {
         try {
             const { restored } = await authStore.stopImpersonation()
@@ -127,10 +127,7 @@ export function useUserMenuItems (fullName) {
         [{
             label: t('messages.app.nav.logout'),
             icon: 'i-tabler-logout',
-            onSelect: async () => {
-                await authStore.logout()
-                await router.push('/auth/login')
-            },
+            onSelect: logout,
         }],
     ])
 }

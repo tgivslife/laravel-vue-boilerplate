@@ -191,16 +191,28 @@ export const useAuthStore = defineStore('auth', {
             }
         },
 
+        /**
+         * End the session server-side, then locally.
+         *
+         * A 401 means the server already holds no session for us, which is what logout wanted.
+         * Anything else (network failure, 5xx) leaves the HTTP-only session alive, so the local state is kept and the error
+         * propagates for the caller to surface: clearing it would only fake a sign-out on a shared workstation.
+         *
+         * @throws {ProblemDetailsError} When the server could not be told to end the session.
+         */
         async logout () {
             this.isLoggingOut = true
             try {
                 await authService.logout()
             } catch (error) {
-                console.warn('Logout request failed; clearing local session anyway.', error)
+                if (!error.isUnauthenticated) {
+                    throw error
+                }
             } finally {
-                this.clearSession()
                 this.isLoggingOut = false
             }
+
+            this.clearSession()
         },
 
         /**

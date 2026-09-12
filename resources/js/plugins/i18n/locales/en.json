@@ -90,6 +90,9 @@
         "captcha_unavailable": "The verification widget could not be loaded. Refresh the page to try again.",
         "session_expired_title": "Signed out",
         "session_expired_description": "Your session has ended. Sign in again to continue where you left off.",
+        "logout": {
+            "failed": "Could not sign out"
+        },
         "magic_link": {
             "label": "Magic link",
             "send": "Send magic link",
