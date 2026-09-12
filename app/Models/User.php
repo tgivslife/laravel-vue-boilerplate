@@ -7,7 +7,6 @@ use App\Models\Concerns\HasPreferences;
 use App\Models\Concerns\HasRequiredPermissions;
 use App\Notifications\ResetPasswordNotification;
 use App\Services\Access\DeletedEmailHasher;
-use App\Support\Device;
 use Database\Factories\UserFactory;
 use Illuminate\Contracts\Translation\HasLocalePreference;
 use Illuminate\Database\Eloquent\Builder;
@@ -222,7 +221,7 @@ class User extends Authenticatable implements HasLocalePreference
             new ResetPasswordNotification(
                 url: $url,
                 expiresInMinutes: (int) config('auth.passwords.users.expire', 60),
-                deviceName: Device::name(request()),
+                userAgent: (string) request()->userAgent(),
                 ipAddress: request()->ip(),
                 requestedAt: now(),
             )->locale(app()->getLocale())

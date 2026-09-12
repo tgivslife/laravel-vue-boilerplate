@@ -5,9 +5,12 @@ namespace Tests\Feature\Auth;
 use App\Models\MagicLinkToken;
 use App\Models\User;
 use App\Notifications\MagicLinkNotification;
+use App\Services\Auth\MagicLinkService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Testing\TestResponse;
+use Tests\Support\RecordingTimebox;
 use Tests\TestCase;
 
 class MagicLinkTest extends TestCase
@@ -18,12 +21,10 @@ class MagicLinkTest extends TestCase
     {
         parent::setUp();
 
-        // The magic-link limiters key by IP, which is identical for every
-        // test in this file; without a flush the counters bleed across tests.
+        // The magic-link limiters key by IP, the same for every test in this file.
         $this->app['cache']->flush();
 
-        // This suite covers the non-provisioning behavior (unknown emails are a silent no-op), so the provision
-        // switch is pinned off regardless of the deployment default; MagicLinkProvisionTest owns the provision-on cases.
+        // Provisioning pinned off whatever the deployment default; MagicLinkProvisionTest owns the provision-on cases.
         config([
             'security.magic_link.enabled' => true,
             'security.magic_link.provision' => false,
@@ -97,6 +98,63 @@ class MagicLinkTest extends TestCase
         Notification::assertNothingSent();
     }
 
+    /**
+     * Every branch of the send decision runs inside the service's own timebox, once, with one floor: unknown with
+     * provisioning off and on, deactivated, and eligible. An early return would otherwise answer in a fraction of
+     * the token work. The disabled switch is global state and answers ahead of the box.
+     */
+    public function test_every_send_branch_runs_inside_the_same_timebox(): void
+    {
+        config(['security.magic_link.request_limit.max_attempts' => 20]);
+        $timebox = new RecordingTimebox;
+        $this->app->instance(MagicLinkService::class, app()->make(MagicLinkService::class, [
+            'timebox' => $timebox,
+            'floorMicroseconds' => 500_000,
+        ]));
+        $eligible = $this->createUser();
+        $inactive = $this->createUser(['is_active' => false]);
+
+        $this->requestLink('nobody@example.com')->assertStatus(202);
+        config(['security.magic_link.provision' => true]);
+        $this->requestLink('newcomer@example.com')->assertStatus(202);
+        config(['security.magic_link.provision' => false]);
+        $this->requestLink($inactive->email)->assertStatus(202);
+        $this->requestLink($eligible->email)->assertStatus(202);
+
+        $this->assertSame([500_000, 500_000, 500_000, 500_000], $timebox->floors);
+        Notification::assertCount(2);
+
+        config(['security.magic_link.enabled' => false]);
+        $this->requestLink($eligible->email)->assertStatus(202);
+        $this->assertCount(4, $timebox->floors);
+    }
+
+    /**
+     * The device name is resolved when the mail renders, not while the request runs: the user-agent parse would
+     * otherwise cost the eligible branch alone tens of milliseconds.
+     */
+    public function test_the_device_name_is_resolved_when_the_mail_renders_not_during_the_request(): void
+    {
+        $user = $this->createUser();
+        // Unique per test: Device memoizes resolved names for the process, which would hide the cache write.
+        $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.'.random_int(1,
+                999_999).'.0 Safari/537.36';
+        $cacheKey = 'device-name:'.hash('sha256', $userAgent);
+
+        $this->withHeader('User-Agent', $userAgent)->requestLink($user->email)->assertStatus(202);
+
+        $this->assertFalse(Cache::has($cacheKey), 'The request parsed the user agent.');
+
+        Notification::assertSentTo(
+            $user,
+            MagicLinkNotification::class,
+            static fn(MagicLinkNotification $notification): bool => str_contains(
+                (string) $notification->toMail($user)->viewData['deviceName'], 'Chrome'
+            ),
+        );
+        $this->assertTrue(Cache::has($cacheKey));
+    }
+
     public function test_request_requires_a_valid_email(): void
     {
         $this->requestLink('not-an-email')->assertStatus(422);
@@ -104,10 +162,7 @@ class MagicLinkTest extends TestCase
 
     public function test_request_with_a_non_scalar_email_is_a_validation_error_not_a_500(): void
     {
-        // The throttle limiter keys on `email` straight from the unvalidated request; a bare (string) cast on an
-        // array value throws "Array to string conversion" inside the middleware - and with warnings promoted to
-        // exceptions, that is a 500 before the form request can answer the shape with a 422. RateLimitServiceProvider
-        // now collapses non-scalars to an empty key, so validation gets to run.
+        // The limiter keys on the unvalidated `email`; an array must collapse to an empty key, not 500 before validation.
         $this->withHeader('Referer', config('app.url'))
             ->postJson('/api/magic-link', ['email' => ['array@example.com']])
             ->assertStatus(422);

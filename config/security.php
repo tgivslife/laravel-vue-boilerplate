@@ -191,6 +191,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Auth Decision Floor
+    |--------------------------------------------------------------------------
+    |
+    | Minimum duration, in milliseconds, of a magic-link request, a password-reset request and the reset itself (MagicLinkService, PasswordResetService).
+    | Every branch of those decisions is padded to it, so the response time no longer says whether the address has an account.
+    | It must clear the work of the slowest branch on this deployment's hardware - a token hash at the configured bcrypt rounds,
+    | plus the broker's own 200ms box - and is a measured starting point, not a guarantee: validate it under load.
+    | The padding holds a request worker for the duration, which is why the request limits sit ahead of it.
+    |
+    */
+
+    'auth_decision_floor_ms' => env('AUTH_DECISION_FLOOR_MS', 500),
+
+    /*
+    |--------------------------------------------------------------------------
     | Magic Link Login
     |--------------------------------------------------------------------------
     |

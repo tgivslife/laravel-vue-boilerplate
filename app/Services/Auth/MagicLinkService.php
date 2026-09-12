@@ -8,45 +8,57 @@ use App\Notifications\InvitationNotification;
 use App\Notifications\MagicLinkNotification;
 use App\Support\Auth\LoginMethod;
 use App\Support\Auth\LoginResult;
-use App\Support\Device;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Timebox;
 
 /**
  * Issues and consumes single-use email magic-link tokens.
  *
- * Issue side: enumeration-resistant by construction - {@see send()} returns void no matter what,
- * and the notification is queued, so a caller can never observe whether the email belonged to a user.
+ * Issue side: enumeration-resistant by construction. {@see send()} returns void whatever it found, the mail is
+ * queued and resolves the requesting device only when it renders, and the whole decision runs inside a timebox of
+ * the service's own, so its duration is the floor whichever branch ran - an early return would otherwise answer in
+ * under a millisecond against the token work of a usable account. The floor is a measured starting point above
+ * that work, not a guarantee.
  *
- * Consume side: single-use is enforced with one conditional UPDATE (claim), so two concurrent consumptions of the same token can never both win.
- * The emailed link only renders an inert SPA page;
- * Consumption happens through an explicit POST, which keeps mail scanners and prefetchers from burning the token.
+ * Consume side: single-use is enforced with one conditional UPDATE (claim), so two concurrent consumptions of the
+ * same token can never both win. The emailed link only renders an inert SPA page; consumption is an explicit POST,
+ * which keeps mail scanners and prefetchers from burning the token.
  *
- * With `security.magic_link.provision` on, a link requested for an unknown email becomes a signup link.
- * The token carries the email instead of a user id, and the account is created only at consumption,
- * clicking the link proved mailbox ownership, requesting one proves nothing.
+ * With `security.magic_link.provision` on, a link requested for an unknown email becomes a signup link: the token
+ * carries the email instead of a user id, and the account is created only at consumption - clicking the link
+ * proved mailbox ownership, requesting one proves nothing.
  *
- * Admin invitations ({@see invite()}) are a second token purpose on the same machinery: minted for a pre-created account,
- * day-scale TTL, and gated by `security.invitations.enabled` rather than the self-serve door switch, so a
+ * Admin invitations ({@see invite()}) are a second token purpose on the same machinery: minted for a pre-created
+ * account, day-scale TTL, and gated by `security.invitations.enabled` rather than the self-serve door switch, so a
  * password-only deployment can keep the login door closed and still invite.
  */
 readonly class MagicLinkService
 {
+    /**
+     * Minimum duration of a send decision, in microseconds.
+     */
+    protected int $floorMicroseconds;
+
+    /**
+     * @param  int|null  $floorMicroseconds  The decision floor; `security.auth_decision_floor_ms` unless given.
+     */
     public function __construct(
         protected MagicLinkTokenHasher $hasher,
         protected TwoFactorChallengeService $challenges,
         protected SelfProvisioningService $provisioner,
+        protected Timebox $timebox = new Timebox,
+        ?int $floorMicroseconds = null,
     ) {
+        $this->floorMicroseconds = $floorMicroseconds
+            ?? 1000 * max((int) config('security.auth_decision_floor_ms', 500), 0);
     }
 
     /**
-     * Issue a magic link for the given email, if it belongs to a usable user - or, with provisioning on,
-     * to no user at all (the consumed link will create the account).
-     *
-     * Deliberately returns void in every case (unknown email, deactivated or banned account, feature disabled),
-     * the HTTP response must be identical for all of them.
-     * Earlier links stay valid until their own TTL so a delayed email does not strand the user; the TTL bounds the exposure.
+     * Issue a magic link for the given email, if it belongs to a usable user - or, with provisioning on, to no user at all, the consumed link creating the account.
+     * Void in every case, so the HTTP response is identical for all of them.
+     * Earlier links stay valid until their own TTL, so a delayed email does not strand the user.
      */
     public function send(string $email, ?string $redirect): void
     {
@@ -54,59 +66,54 @@ readonly class MagicLinkService
             return;
         }
 
-        $user = User::query()->where('email', $email)->first();
+        $this->timebox->call(function () use ($email, $redirect): void {
+            $user = User::query()->where('email', $email)->first();
 
-        if ($user === null && !(bool) config('security.magic_link.provision', false)) {
-            return;
-        }
+            if ($user === null && !(bool) config('security.magic_link.provision', false)) {
+                return;
+            }
 
-        if ($user !== null && !$user->canAuthenticate()) {
-            return;
-        }
+            if ($user !== null && !$user->canAuthenticate()) {
+                return;
+            }
 
-        $plaintext = $this->generateToken();
-        $ttlMinutes = (int) config('security.magic_link.ttl_minutes', 15);
+            $plaintext = $this->generateToken();
+            $ttlMinutes = (int) config('security.magic_link.ttl_minutes', 15);
 
-        MagicLinkToken::query()->create([
-            'user_id' => $user?->id,
-            // Normalized so the consume-time lookup and the created account agree regardless of how the address was typed or the database collates.
-            'email' => $user === null ? mb_strtolower(trim($email)) : null,
-            'purpose' => MagicLinkToken::PURPOSE_LOGIN,
-            'token_hash' => $this->hasher->hash($plaintext),
-            'expires_at' => now()->addMinutes($ttlMinutes),
-        ]);
+            MagicLinkToken::query()->create([
+                'user_id' => $user?->id,
+                // Normalized so the consume-time lookup and the created account agree regardless of how the address was typed or the database collates.
+                'email' => $user === null ? mb_strtolower(trim($email)) : null,
+                'purpose' => MagicLinkToken::PURPOSE_LOGIN,
+                'token_hash' => $this->hasher->hash($plaintext),
+                'expires_at' => now()->addMinutes($ttlMinutes),
+            ]);
 
-        /*
-         * The requesting device is snapshot here as scalars: the notification is queued, and the mail shows
-         * the recipient which device asked for the link (anyone can request one for any email).
-         * A provisioning link goes to a bare address (no account to notify yet) with the welcome copy.
-         */
-        $notification = new MagicLinkNotification(
-            url: $this->verificationUrl($plaintext, $redirect, provisioning: $user === null),
-            expiresInMinutes: $ttlMinutes,
-            deviceName: Device::name(request()),
-            ipAddress: request()->ip(),
-            requestedAt: now(),
-            provisioning: $user === null,
-        )->locale(app()->getLocale());
+            // Scalars only, for the queue; a provisioning link goes to a bare address, there being no account yet.
+            $notification = new MagicLinkNotification(
+                url: $this->verificationUrl($plaintext, $redirect, provisioning: $user === null),
+                expiresInMinutes: $ttlMinutes,
+                userAgent: (string) request()->userAgent(),
+                ipAddress: request()->ip(),
+                requestedAt: now(),
+                provisioning: $user === null,
+            )->locale(app()->getLocale());
 
-        if ($user === null) {
-            Notification::route('mail', $email)->notify($notification);
-        } else {
-            $user->notify($notification);
-        }
+            if ($user === null) {
+                Notification::route('mail', $email)->notify($notification);
+            } else {
+                $user->notify($notification);
+            }
+        }, $this->floorMicroseconds);
     }
 
     /**
-     * Issue a first-sign-in invitation link for an admin-created account.
+     * Issue a first-sign-in invitation link for an admin-created account; the caller owns the feature gate and the
+     * pending-state guard, this only mints and mails.
      *
-     * Prior unconsumed invitations are revoked rather than left to their TTL: unlike the self-serve door,
-     * both sides of the exchange are known, so a resend should leave exactly one live link.
-     * The caller owns the feature gate and the pending-state guard (delivery validation on creation,
-     * AccessControlService::resendInvitation() on resend) - this method only mints and mails.
-     *
-     * No requesting-device snapshot: the mail is admin-initiated, so "which device asked for this"
-     * would name the admin's browser, not anything the recipient can judge.
+     * Prior unconsumed invitations are revoked rather than left to their TTL: both sides of the exchange are known,
+     * so a resend should leave exactly one live link.
+     * No requesting-device line in the mail: it would name the admin's browser, nothing the recipient can judge.
      */
     public function invite(User $user): void
     {
@@ -138,23 +145,17 @@ readonly class MagicLinkService
     /**
      * Consume a magic-link token and establish a session for its user.
      *
-     * The session-state guards run before the claim so those outcomes never burn a still-valid token.
-     * All token failures (unknown, expired, already used) collapse into one indistinguishable `invalidMagicLink` result.
-     * Account-state checks run after the claim, so a rejected token is spent either way.
-     * On success the session is regenerated to prevent fixation, and the email is marked verified,
-     * the link just proved mailbox ownership.
+     * The session-state guards run before the claim, so those outcomes never burn a still-valid token; everything
+     * else runs after it, so a rejected token is spent either way: the account-state check, and each purpose's own
+     * switch (`magic_link.enabled`, `invitations.enabled`), unknowable until the row is read, so outstanding links
+     * of a disabled purpose die spent. Every token failure - unknown, expired, used, disabled - collapses into one
+     * indistinguishable `invalidMagicLink` result.
      *
-     * Enrolled accounts are parked for the two-factor challenge instead of logged in;
-     * The link proves the mailbox, not the second factor, and a compromised inbox alone must never become an account takeover.
-     * The token is spent even when the challenge is abandoned.
-     *
-     * A provisioning token (null user id) creates its account here, where the mailbox is proven - unless an
-     * account with that email appeared since the send, in which case the link simply signs into it: the
-     * mailbox guarantee is the same either way.
-     *
-     * Each purpose answers to its own switch (`magic_link.enabled` for login links, `invitations.enabled`
-     * for invitations), checked only after the claim - a token's purpose is unknown until its row is read.
-     * Outstanding links of a disabled purpose therefore die spent, with the same indistinguishable outcome as expired ones.
+     * On success the session is regenerated against fixation and the email marked verified, the link having proved
+     * the mailbox. Enrolled accounts are parked for the two-factor challenge instead: the link proves the mailbox,
+     * not the second factor, and a compromised inbox alone must never become a takeover; the token is spent even if
+     * the challenge is abandoned. A provisioning token creates its account here, where the mailbox is proven, unless
+     * one with that email appeared since the send, in which case the link signs into it - the guarantee is the same.
      */
     public function consume(string $token): LoginResult
     {
@@ -235,14 +236,11 @@ readonly class MagicLinkService
     }
 
     /**
-     * The account a provisioning token signs into: the existing holder of the email when an account
-     * appeared since the send, otherwise a freshly provisioned one.
+     * The account a provisioning token signs into: the existing holder of the email if one appeared since the send,
+     * otherwise a freshly provisioned one. Two links for the same email racing is settled by the unique index: the
+     * loser's violation is caught and the winner's account re-resolved, the framework's createOrFirst() idiom.
      *
-     * The lookup is the fast path; the unique-violation catch settles the race between two provisioning
-     * links for the same email by re-resolving the account the winner created - the same idiom the
-     * framework's createOrFirst() uses, with the unique index as the arbiter.
-     *
-     * @return array{0: ?User, 1: bool} The resolved account (null only when even the re-resolve finds nothing) and whether this call created it.
+     * @return array{0: ?User, 1: bool} The account (null only when even the re-resolve finds nothing) and whether this call created it.
      */
     protected function resolveOrProvision(string $email): array
     {
@@ -268,8 +266,7 @@ readonly class MagicLinkService
     }
 
     /**
-     * 32 bytes of CSPRNG (Cryptographically Secure Pseudorandom Number Generator) output,
-     * URL-safe base64 encoded (43 characters).
+     * 32 bytes of CSPRNG (Cryptographically Secure Pseudorandom Number Generator) output, URL-safe base64 encoded (43 characters).
      */
     protected function generateToken(): string
     {
@@ -279,13 +276,10 @@ readonly class MagicLinkService
     /**
      * Build the SPA verification URL carried by the email.
      *
-     * The redirect is only forwarded when it is an internal path (single
-     * leading slash), so a crafted request cannot turn the email into an open
-     * redirect. The SPA applies the same validation again before navigating.
-     *
-     * Provisioning links carry a `signup` marker and invitations an `invite` marker so the verify page
-     * can adapt its copy. Cosmetic only - consumption ignores them - and no leak: they ride inside the
-     * secret link, whose only reader the mail already told.
+     * The redirect is forwarded only as an internal path (single leading slash), so a crafted request cannot turn
+     * the email into an open redirect; the SPA validates it again before navigating. The `signup` and `invite`
+     * markers let the verify page adapt its copy - cosmetic, ignored by consumption, and no leak, since they ride
+     * inside the secret link, whose only reader the mail already told.
      */
     protected function verificationUrl(
         string $plaintext,

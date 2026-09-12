@@ -2,6 +2,7 @@
 
 namespace App\Notifications;
 
+use App\Support\Device;
 use Carbon\CarbonInterface;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeEncrypted;
@@ -10,16 +11,12 @@ use Illuminate\Notifications\Messages\MailMessage;
 use Illuminate\Notifications\Notification;
 
 /**
- * Carries a single-use password-reset link to the user's mailbox.
+ * Carries a single-use password-reset link to the user's mailbox; the token itself is the password broker's.
  *
- * Queued deliberately: dispatching the mail inline would make the forgot-password endpoint's response time depend on
- * whether a user exists, undoing its enumeration resistance.
- * Token creation, hashing, expiry and single-use semantics live in the framework's password broker; this class only carries the built URL.
- * ShouldBeEncrypted so the reset token in that URL never sits readable in the queue backend, failed_jobs or Horizon:
- * the serialized payload is APP_KEY-encrypted at rest and decrypted only by the worker.
- *
- * Carries a scalar snapshot of the requesting device: the forgot-password endpoint is open to anyone, so the mail
- * shows the recipient which device asked for the reset, letting them judge the "ignore this email" advice.
+ * Queued, and ShouldBeEncrypted: the URL embeds the token, so the payload is APP_KEY-encrypted in the queue backend,
+ * failed_jobs and Horizon, decrypted only by the worker. The requesting device is named for the recipient, since
+ * anyone can request a reset for any address, but resolved from the raw user agent only here, when the mail renders
+ * on the worker: the parse is tens of milliseconds the request must not spend only when a user exists.
  */
 class ResetPasswordNotification extends Notification implements ShouldBeEncrypted, ShouldQueue
 {
@@ -31,7 +28,7 @@ class ResetPasswordNotification extends Notification implements ShouldBeEncrypte
     public function __construct(
         private readonly string $url,
         private readonly int $expiresInMinutes,
-        private readonly string $deviceName,
+        private readonly string $userAgent,
         private readonly ?string $ipAddress,
         private readonly CarbonInterface $requestedAt,
     ) {
@@ -61,7 +58,7 @@ class ResetPasswordNotification extends Notification implements ShouldBeEncrypte
             ->subject(__('api.auth.password_reset.mail.subject'))
             ->action(__('api.auth.password_reset.mail.action'), $this->url)
             ->markdown('mail.auth.reset-password', [
-                'deviceName' => $this->deviceName,
+                'deviceName' => Device::nameFromUserAgent($this->userAgent),
                 'ipAddress' => $this->ipAddress ?? '-',
                 'requestedAt' => $localizedRequestedAt,
                 'expiresInMinutes' => $this->expiresInMinutes,

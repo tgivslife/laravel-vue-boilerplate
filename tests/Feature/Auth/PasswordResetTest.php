@@ -5,12 +5,17 @@ namespace Tests\Feature\Auth;
 use App\Models\User;
 use App\Notifications\PasswordChangedNotification;
 use App\Notifications\ResetPasswordNotification;
+use App\Services\Auth\PasswordResetService;
+use App\Services\Auth\SessionRegistry;
 use Illuminate\Auth\Events\PasswordReset;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Timebox;
 use Illuminate\Testing\TestResponse;
+use Tests\Support\RecordingTimebox;
 use Tests\TestCase;
 
 class PasswordResetTest extends TestCase
@@ -114,6 +119,123 @@ class PasswordResetTest extends TestCase
         $this->requestReset($user->email)->assertStatus(202);
 
         $this->requestReset($user->email)->assertStatus(429);
+    }
+
+    /**
+     * Every branch of the send decision runs inside the service's own timebox, once, with one floor: unknown,
+     * deactivated, eligible, and eligible but throttled by the broker. The broker's box covers only the branches
+     * that reach it, so a branch outside the service's would answer in a fraction of the time. The disabled switch
+     * is global state, not account state, and answers ahead of the box.
+     */
+    public function test_every_send_branch_runs_inside_the_same_timebox(): void
+    {
+        config(['security.password_reset.request_limit.max_attempts' => 20]);
+        $timebox = $this->recordingTimebox();
+        $eligible = $this->createUser();
+        $inactive = $this->createUser(['is_active' => false]);
+
+        $this->requestReset('nobody@example.com')->assertStatus(202);
+        $this->requestReset($inactive->email)->assertStatus(202);
+        $this->requestReset($eligible->email)->assertStatus(202);
+        $this->requestReset($eligible->email)->assertStatus(202);
+
+        $this->assertSame([500_000, 500_000, 500_000, 500_000], $timebox->floors);
+        Notification::assertSentToTimes($eligible, ResetPasswordNotification::class, 1);
+
+        config(['security.password_reset.enabled' => false]);
+        $this->requestReset($eligible->email)->assertStatus(202);
+        $this->assertCount(4, $timebox->floors);
+    }
+
+    /**
+     * Every branch of the reset decision runs inside the same box too: unknown email, deactivated account, wrong,
+     * expired and valid tokens. The broker returns early from its own box on success; the service's box does not.
+     */
+    public function test_every_reset_branch_runs_inside_the_same_timebox(): void
+    {
+        $user = $this->createUser();
+        $inactive = $this->createUser(['is_active' => false]);
+        $token = $this->issueTokenFor($user);
+        $expiredUser = $this->createUser();
+        $expiredToken = $this->issueTokenFor($expiredUser);
+        $timebox = $this->recordingTimebox();
+
+        $this->travel((int) config('auth.passwords.users.expire') + 1)->minutes();
+        $this->performReset($expiredUser->email, $expiredToken)->assertStatus(401);
+        $this->travelBack();
+
+        $this->performReset('nobody@example.com', 'any-token')->assertStatus(401);
+        $this->performReset($inactive->email, 'any-token')->assertStatus(401);
+        $this->performReset($user->email, 'wrong-token')->assertStatus(401);
+        $this->performReset($user->email, $token)->assertStatus(200);
+
+        $this->assertSame(array_fill(0, 5, 500_000), $timebox->floors);
+
+        config(['security.password_reset.enabled' => false]);
+        $this->performReset($user->email, $token)->assertStatus(401);
+        $this->assertCount(5, $timebox->floors);
+    }
+
+    /**
+     * The floor comes from config, since it has to clear the token-hash cost on the deployment's hardware.
+     */
+    public function test_the_decision_floor_comes_from_config(): void
+    {
+        config(['security.auth_decision_floor_ms' => 123]);
+        $timebox = new RecordingTimebox;
+        $this->app->instance(
+            PasswordResetService::class,
+            new PasswordResetService(app(SessionRegistry::class), $timebox),
+        );
+
+        $this->requestReset('nobody@example.com')->assertStatus(202);
+
+        $this->assertSame([123_000], $timebox->floors);
+    }
+
+    /**
+     * The floor is real: on a real timebox, an unknown address and an eligible one both take at least the floor. A
+     * lower bound only, since the two durations cannot be compared reliably under a loaded runner; that the same box
+     * wraps every branch is the recording timebox's job above.
+     */
+    public function test_an_unknown_and_an_eligible_address_both_take_the_floor(): void
+    {
+        $floorMs = 250;
+        $service = new PasswordResetService(app(SessionRegistry::class), new Timebox, $floorMs * 1000);
+        $user = $this->createUser();
+
+        $unknown = $this->millisecondsTaken(fn() => $service->sendResetLink('nobody@example.com'));
+        $eligible = $this->millisecondsTaken(fn() => $service->sendResetLink($user->email));
+
+        // A few milliseconds of slack: the box rounds its remainder down and usleep() may wake a little early.
+        $this->assertGreaterThanOrEqual($floorMs - 10, $unknown);
+        $this->assertGreaterThanOrEqual($floorMs - 10, $eligible);
+    }
+
+    /**
+     * The device name is resolved when the mail renders, not while the request runs: the user-agent parse is what
+     * gave the eligible branch its extra hundred milliseconds.
+     */
+    public function test_the_device_name_is_resolved_when_the_mail_renders_not_during_the_request(): void
+    {
+        $user = $this->createUser();
+        // Unique per test: Device memoizes resolved names for the process, which would hide the cache write.
+        $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.'.random_int(1,
+                999_999).'.0 Safari/537.36';
+        $cacheKey = 'device-name:'.hash('sha256', $userAgent);
+
+        $this->withHeader('User-Agent', $userAgent)->requestReset($user->email)->assertStatus(202);
+
+        $this->assertFalse(Cache::has($cacheKey), 'The request parsed the user agent.');
+
+        Notification::assertSentTo(
+            $user,
+            ResetPasswordNotification::class,
+            static fn(ResetPasswordNotification $notification): bool => str_contains(
+                (string) $notification->toMail($user)->viewData['deviceName'], 'Chrome'
+            ),
+        );
+        $this->assertTrue(Cache::has($cacheKey));
     }
 
     public function test_emailed_link_targets_the_spa_reset_page_with_token_and_email(): void
@@ -282,6 +404,32 @@ class PasswordResetTest extends TestCase
     /* ------------------------------------------------------------------ *
      *  Helpers
      * ------------------------------------------------------------------ */
+
+    /**
+     * Swap the service the endpoints resolve for one on a recording timebox, and hand the box back.
+     */
+    private function recordingTimebox(): RecordingTimebox
+    {
+        $timebox = new RecordingTimebox;
+
+        $this->app->instance(
+            PasswordResetService::class,
+            new PasswordResetService(app(SessionRegistry::class), $timebox, 500_000),
+        );
+
+        return $timebox;
+    }
+
+    /**
+     * @param  callable(): void  $callback
+     */
+    private function millisecondsTaken(callable $callback): float
+    {
+        $start = hrtime(true);
+        $callback();
+
+        return (hrtime(true) - $start) / 1_000_000;
+    }
 
     /**
      * Request a password-reset link as the SPA would (stateful frontend origin).

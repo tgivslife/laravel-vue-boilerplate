@@ -21,7 +21,7 @@ Each document covers one domain: what is implemented and, next to every feature,
 | `MAGIC_LINK_*`                                                                            | [authentication.md](authentication.md) (the 2FA mandate flag is explained in [two-factor.md](two-factor.md)) |
 | `PASSWORD_RESET_*`, `PASSWORD_CONFIRM_*`                                                  | [authentication.md](authentication.md)                                                                       |
 | `IDENTITY_PROVIDERS_*`, `ROEID_*`, `ID_PROVIDER_*`                                        | [authentication.md](authentication.md)                                                                       |
-| `SESSION_REGISTRY_*`, `PAT_*`, `AUTH_LOG_*`, `AUTH_PASSWORD_CHANGED_*`                    | [authentication.md](authentication.md)                                                                       |
+| `SESSION_REGISTRY_*`, `PAT_*`, `AUTH_LOG_*`, `AUTH_PASSWORD_CHANGED_*`, `AUTH_DECISION_FLOOR_MS` | [authentication.md](authentication.md)                                                                       |
 | `TWO_FACTOR_*`                                                                            | [two-factor.md](two-factor.md)                                                                               |
 | `ACCESS_SELF_PROVISION_ROLES`                                                             | [account-lifecycle.md](account-lifecycle.md)                                                                 |
 | `ACCESS_IMPERSONATION_ENABLED`                                                            | [access-control.md](access-control.md)                                                                       |

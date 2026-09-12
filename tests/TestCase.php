@@ -13,6 +13,15 @@ use Illuminate\Testing\TestResponse;
 
 abstract class TestCase extends BaseTestCase
 {
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // The magic-link and password-reset decisions sleep to a floor in production; the suite runs them at zero.
+        // The tests that pin the floor pass their own.
+        config(['security.auth_decision_floor_ms' => 0]);
+    }
+
     /**
      * Authenticate as a stateful (session-based) client by hitting the login endpoint with a Referer header.
      * The Referer persists for all subsequent requests in the test, so they are recognized as first-party by Sanctum.

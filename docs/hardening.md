@@ -201,6 +201,13 @@ Per-provider values for the two URLs (the defaults are Turnstile's):
   distinguishing them would tell a guesser something.
 - **Queued notifications carry scalar snapshots only**, never models - and mails that matter to account safety (new
   device, lockout, password changed, two-factor changes, magic links) are all queued so response timing reveals nothing.
+  The magic-link and password-reset mails resolve the requesting device when they render, on the worker, since the
+  user-agent parse would otherwise cost the request tens of milliseconds only when a user exists.
+- **Timeboxed decisions**: the magic-link request, the password-reset request and the reset itself run their whole
+  decision inside a timebox of the service's own, so every branch takes the floor (`AUTH_DECISION_FLOOR_MS`, 500 ms
+  by default). The floor is a measured starting point above the slowest branch's work at production bcrypt cost,
+  not a guarantee: it must be validated on the deployment's hardware, work that outgrows it under load shows through
+  again, and the sleep holds a worker, which is why the rate limits sit ahead of it.
 - **Secrets at rest**: magic-link tokens and deleted-email membership hashes are APP_KEY-keyed HMACs; TOTP secrets are
   encrypted; recovery codes and passwords are bcrypt hashes. The three mails that carry a live token in their URL
   (magic-link, invitation, password-reset) are `ShouldBeEncrypted`, so that same posture extends to the queue: their

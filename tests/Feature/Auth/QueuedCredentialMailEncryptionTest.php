@@ -49,7 +49,7 @@ class QueuedCredentialMailEncryptionTest extends TestCase
             new MagicLinkNotification(
                 url: 'https://app.test/auth/magic-link?token='.$token,
                 expiresInMinutes: 15,
-                deviceName: 'Test Device',
+                userAgent: 'TestBrowser/1.0',
                 ipAddress: '203.0.113.5',
                 requestedAt: now(),
             )

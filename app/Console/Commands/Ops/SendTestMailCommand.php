@@ -19,12 +19,10 @@ use Illuminate\Notifications\Notification;
 use Illuminate\Support\Facades\Notification as NotificationDispatcher;
 
 /**
- * Sends sample transactional mails to an arbitrary address for reviewing email layouts in a real client.
+ * Sends sample transactional mails to an arbitrary address, for reviewing the layouts in a real client.
  *
- * Mails are sent on demand (no user record involved) and synchronously, bypassing the queue, so the result lands
- * immediately via whatever mailer is configured.
- * Sample data uses documentation addresses; the link-carrying mails (magic link, invitation, password reset) hold
- * dummy tokens that cannot be consumed.
+ * Sent on demand with no user record and synchronously, bypassing the queue, so the result lands at once through whatever mailer is configured.
+ * The sample data uses documentation addresses, and the link-carrying mails hold dummy tokens that cannot be consumed.
  */
 #[Signature('mail:send-test
     {email : Address to deliver the test mails to}
@@ -82,20 +80,21 @@ class SendTestMailCommand extends Command
     private function sampleMails(): array
     {
         $deviceName = 'Windows 11 / Chrome 149.0';
+        $userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/149.0.0.0 Safari/537.36';
         $ipAddress = '203.0.113.42';
 
         return [
             'magic-link' => new MagicLinkNotification(
                 url: url('/auth/magic/verify?token=sample-token-for-layout-testing'),
                 expiresInMinutes: 15,
-                deviceName: $deviceName,
+                userAgent: $userAgent,
                 ipAddress: $ipAddress,
                 requestedAt: now(),
             ),
             'magic-link-signup' => new MagicLinkNotification(
                 url: url('/auth/magic/verify?token=sample-token-for-layout-testing&signup=1'),
                 expiresInMinutes: 15,
-                deviceName: $deviceName,
+                userAgent: $userAgent,
                 ipAddress: $ipAddress,
                 requestedAt: now(),
                 provisioning: true,
@@ -113,7 +112,7 @@ class SendTestMailCommand extends Command
             'password-reset' => new ResetPasswordNotification(
                 url: url('/auth/password/reset?token=sample-token-for-layout-testing&email=layout%40example.com'),
                 expiresInMinutes: (int) config('auth.passwords.users.expire', 60),
-                deviceName: $deviceName,
+                userAgent: $userAgent,
                 ipAddress: $ipAddress,
                 requestedAt: now(),
             ),

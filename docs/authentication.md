@@ -6,7 +6,13 @@ The sign-in doors and the account-security plumbing around them. Two-factor auth
 
 Every door shares the same account-state gate (`canAuthenticate()`: active and not banned), declares its login method
 for the authentication log, and regenerates the session on success. Auth endpoints are enumeration-resistant by
-convention: identical responses whether or not an account exists.
+convention: identical responses whether or not an account exists, and the magic-link and password-reset decisions
+take the same time whichever way they went, padded to a floor that must clear the token-hash cost on the deployment's
+hardware.
+
+| Env                      | Default | Meaning                                                             |
+|--------------------------|---------|---------------------------------------------------------------------|
+| `AUTH_DECISION_FLOOR_MS` | `500`   | Minimum duration of a magic-link or password-reset request decision. |
 
 ## Password login
 
