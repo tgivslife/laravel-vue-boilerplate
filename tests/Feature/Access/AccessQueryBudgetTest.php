@@ -3,7 +3,9 @@
 namespace Tests\Feature\Access;
 
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
+use Spatie\Permission\PermissionRegistrar;
 
 /**
  * Query budgets for the access write path.
@@ -172,6 +174,31 @@ class AccessQueryBudgetTest extends AccessTestCase
             ->all();
     }
 
+    /**
+     * The registrar's shared cache holds permissions and their role mappings, never a user's own assignments, so a
+     * user-directed mutation must not make every process rebuild it; a role edit must.
+     */
+    public function test_only_role_edits_forget_the_shared_permission_cache(): void
+    {
+        $this->actingAsFullAdmin();
+        $subject = $this->createUser();
+        $ops = config('permission.models.role')::findOrCreate('ops', config('access.guard'));
+        $cacheKey = (string) config('permission.cache.key');
+
+        app(PermissionRegistrar::class)->getPermissions();
+        $this->assertTrue(Cache::has($cacheKey));
+
+        $this->putJson("/api/access/users/{$subject->id}/permissions", [
+            'permission_ids' => [$this->permission('users.view')->getKey()],
+        ])->assertOk();
+        $this->assertTrue(Cache::has($cacheKey));
+
+        $this->putJson("/api/access/roles/{$ops->getKey()}/permissions", [
+            'permission_ids' => [$this->permission('users.view')->getKey()],
+        ])->assertOk();
+        $this->assertFalse(Cache::has($cacheKey));
+    }
+
     public function test_a_user_role_sync_does_not_query_per_granted_role(): void
     {
         // The grant ceiling asks one question about the union of the added roles' permissions; it used to walk
@@ -199,9 +226,9 @@ class AccessQueryBudgetTest extends AccessTestCase
             $counts[6],
             "One role cost {$counts[1]} queries and six cost {$counts[6]} - the ceiling is scaling per role.",
         );
-        // Five of these re-read the actor's and target's grants under the lock, so a revocation committed while
-        // the request waited for it counts; the ceiling sits a few above the measured plan, as elsewhere here.
-        $this->assertLessThanOrEqual(39, $counts[1], "A user role sync took {$counts[1]} queries.");
+        // Three of these re-read the actor's and target's grants under the lock, batched, so a revocation committed
+        // while the request waited for it counts; the ceiling sits a few above the measured plan, as elsewhere here.
+        $this->assertLessThanOrEqual(34, $counts[1], "A user role sync took {$counts[1]} queries.");
     }
 
     public function test_a_mutation_resolves_the_super_admin_role_once(): void

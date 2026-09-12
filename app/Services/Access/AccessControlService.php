@@ -57,7 +57,8 @@ final readonly class AccessControlService
         $this->mutate($actor, $target, function () use ($actor, $target, $roleIds): void {
             $roles = $this->rolesInGuard($roleIds);
 
-            $before = $target->roles()->pluck('name')->sort()->values()->all();
+            // The roles relation was reloaded under the lock by mutate(); the after-snapshot below reads back what landed.
+            $before = $target->roles->pluck('name')->sort()->values()->all();
 
             /*
              * Both ceilings read the pre-mutation state from $before, inside the transaction and under the same
@@ -349,7 +350,7 @@ final readonly class AccessControlService
 
         $this->mutate($actor, $target, function () use ($actor, $target): void {
             $before = $this->accountSnapshot($target) + [
-                    'roles' => $target->roles()->pluck('name')->sort()->values()->all(),
+                    'roles' => $target->roles->pluck('name')->sort()->values()->all(),
                 ];
 
             $this->retirement->retire($target);
@@ -394,7 +395,7 @@ final readonly class AccessControlService
             $this->audit($actor, 'role.created', $role, null, ['name' => $name]);
 
             return $role;
-        });
+        }, editsRoles: true);
     }
 
     /**
@@ -413,7 +414,7 @@ final readonly class AccessControlService
             $this->audit($actor, 'role.renamed', $role, $before, ['name' => $name]);
 
             return $role;
-        });
+        }, editsRoles: true);
     }
 
     /**
@@ -437,7 +438,7 @@ final readonly class AccessControlService
             $role->delete();
 
             $this->audit($actor, 'role.deleted', $role, $before, null);
-        });
+        }, editsRoles: true);
     }
 
     /**
@@ -467,7 +468,7 @@ final readonly class AccessControlService
                 $this->audit($actor, 'role.permissions_synced', $role, ['permissions' => $before],
                     ['permissions' => $after]);
             }
-        });
+        }, editsRoles: true);
     }
 
     /**
@@ -643,14 +644,15 @@ final readonly class AccessControlService
      * The target is part of the signature so no mutation can skip the tier decision: user-directed methods pass theirs, role/rule methods pass null.
      * The ceilings run after the lock on grants re-read under it, since anything answered earlier may predate a mutation the lock waited on.
      * Pre-mutation state is snapshot so the lockout guards fire only for what the mutation itself broke.
-     * Permission caches are flushed after commit.
+     * The scope memos are flushed after commit; the registrar's shared cache only when the mutation edits roles,
+     * since it holds permissions and their role mappings, never a user's own assignments.
      */
-    private function mutate(User $actor, ?User $target, Closure $callback): mixed
+    private function mutate(User $actor, ?User $target, Closure $callback, bool $editsRoles = false): mixed
     {
         $result = DB::transaction(function () use ($actor, $target, $callback) {
             $permissions = $this->lockLockoutPermissionRows();
 
-            $this->forgetAuthorizationReadBeforeLock($actor, $target);
+            $this->rereadGrantsUnderLock($actor, $target);
 
             if ($target !== null) {
                 $this->assertTargetWithinTier($actor, $target);
@@ -683,25 +685,28 @@ final readonly class AccessControlService
             return $result;
         });
 
-        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        if ($editsRoles) {
+            app(PermissionRegistrar::class)->forgetCachedPermissions();
+        }
+
         $this->access->flush();
 
         return $result;
     }
 
     /**
-     * Drop every authorization answer produced before the lock was held.
+     * Replace every authorization answer produced before the lock was held.
      *
      * The lock may have waited on another mutation, so grants read earlier in the request may since have been revoked or added.
      * Those answers live in two per-request places - the AccessScope memos and the roles/permissions relations loaded on
-     * the actor and target - so both are dropped and the ceilings re-read the pivots under the lock.
+     * the actor and target - so the memos are dropped and the relations reloaded together, three queries for both
+     * accounts, and the ceilings read the pivots as they are under the lock.
      * The registrar's shared cache stays: nothing under the lock reads it, and forgetting it would rebuild it system-wide.
      */
-    private function forgetAuthorizationReadBeforeLock(User $actor, ?User $target): void
+    private function rereadGrantsUnderLock(User $actor, ?User $target): void
     {
-        foreach ([$actor, $target] as $user) {
-            $user?->unsetRelation('roles')->unsetRelation('permissions');
-        }
+        new EloquentCollection(array_values(array_filter([$actor, $target])))
+            ->load(['roles.permissions', 'permissions']);
 
         $this->access->forgetGrants();
     }
