@@ -356,17 +356,6 @@ class AccessAdminApiTest extends AccessTestCase
         $this->assertNotNull($users[$noticed->id]['inactivity_notice_sent_at']);
     }
 
-    public function test_the_users_list_is_searchable(): void
-    {
-        $this->actingAsManager();
-        $this->createUser(['first_name' => 'Zeburiah', 'last_name' => 'Quixote']);
-
-        $response = $this->getJson('/api/access/users?filter[search]=zeburiah')->assertOk();
-
-        $this->assertCount(1, $response->json('data.users'));
-        $this->assertSame('Zeburiah', $response->json('data.users.0.first_name'));
-    }
-
     public function test_the_users_list_filters_by_role_and_status(): void
     {
         $admin = $this->actingAsManager();

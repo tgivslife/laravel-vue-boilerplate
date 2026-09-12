@@ -10,20 +10,11 @@ class LogoutTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_authenticated_user_can_logout(): void
+    public function test_token_logout_revokes_the_current_access_token(): void
     {
         $user = $this->createUser();
 
-        $response = $this->actingAsStateless($user)->postJson('/api/logout');
-
-        $response->assertNoContent();
-    }
-
-    public function test_logout_revokes_the_current_access_token(): void
-    {
-        $user = $this->createUser();
-
-        $this->actingAsStateless($user)->postJson('/api/logout');
+        $this->actingAsStateless($user)->postJson('/api/logout')->assertNoContent();
 
         $this->assertSame(0, $user->tokens()->count());
     }
@@ -47,20 +38,11 @@ class LogoutTest extends TestCase
         $this->assertSame(0, $user->tokens()->count());
     }
 
-    public function test_web_authenticated_user_can_logout(): void
+    public function test_session_logout_signs_the_session_out(): void
     {
         $user = $this->createUser();
 
-        $response = $this->actingAsStateful($user)->postJson('/api/logout');
-
-        $response->assertNoContent();
-    }
-
-    public function test_web_logout_invalidates_the_session(): void
-    {
-        $user = $this->createUser();
-
-        $this->actingAsStateful($user)->postJson('/api/logout');
+        $this->actingAsStateful($user)->postJson('/api/logout')->assertNoContent();
 
         $this->assertFalse(Auth::guard('web')->check());
     }

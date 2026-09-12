@@ -163,16 +163,6 @@ class AuthenticationLogTest extends TestCase
         $this->assertSame(1, $user->authentications()->where('login_successful', false)->count());
     }
 
-    public function test_logging_can_be_disabled(): void
-    {
-        config(['security.authentication_log.enabled' => false]);
-        $user = $this->createUser();
-
-        $this->login($user)->assertOk();
-
-        $this->assertDatabaseCount('authentication_logs', 0);
-    }
-
     public function test_successful_login_updates_the_last_login_summary(): void
     {
         $user = $this->createUser();
@@ -209,7 +199,7 @@ class AuthenticationLogTest extends TestCase
         $this->assertTrue($user->refresh()->last_login_at->equalTo($firstLoginAt));
     }
 
-    public function test_last_login_summary_updates_even_when_logging_is_disabled(): void
+    public function test_disabling_the_log_keeps_the_last_login_summary(): void
     {
         config(['security.authentication_log.enabled' => false]);
         $user = $this->createUser();

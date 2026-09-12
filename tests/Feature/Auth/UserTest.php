@@ -23,6 +23,9 @@ class UserTest extends TestCase
         $response = $this->actingAsStateless($user)->getJson('/api/user');
 
         $response->assertOk();
+        $response->assertJsonStructure(['status', 'message', 'data']);
+        $response->assertJsonPath('status', 200);
+        $response->assertJsonMissingPath('meta');
         $response->assertJsonPath('data.id', $user->id);
         $response->assertJsonPath('data.first_name', $user->first_name);
         $response->assertJsonPath('data.last_name', $user->last_name);
@@ -78,17 +81,5 @@ class UserTest extends TestCase
         // The middleware revokes the credential, so access does not silently
         // resume if the account is reactivated with an old token in the wild.
         $this->assertDatabaseCount('personal_access_tokens', 0);
-    }
-
-    public function test_user_response_contains_expected_envelope(): void
-    {
-        $user = $this->createUser();
-
-        $response = $this->actingAsStateless($user)->getJson('/api/user');
-
-        $response->assertOk();
-        $response->assertJsonStructure(['status', 'message', 'data']);
-        $response->assertJsonPath('status', 200);
-        $response->assertJsonMissingPath('meta');
     }
 }

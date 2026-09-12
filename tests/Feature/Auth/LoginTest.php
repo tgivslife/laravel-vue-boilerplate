@@ -39,7 +39,7 @@ class LoginTest extends TestCase
         $this->assertGuest();
     }
 
-    public function test_login_with_matching_referer_authenticates_the_user(): void
+    public function test_a_first_party_login_signs_the_user_in_and_returns_them(): void
     {
         $user = $this->createUser();
 
@@ -47,15 +47,6 @@ class LoginTest extends TestCase
 
         $response->assertStatus(200);
         $this->assertAuthenticatedAs($user);
-    }
-
-    public function test_successful_login_response_contains_the_user_resource(): void
-    {
-        $user = $this->createUser();
-
-        $response = $this->loginAs($user, 'password');
-
-        $response->assertStatus(200);
         $response->assertJsonPath('data.id', $user->id);
         $response->assertJsonPath('data.first_name', $user->first_name);
         $response->assertJsonPath('data.last_name', $user->last_name);
