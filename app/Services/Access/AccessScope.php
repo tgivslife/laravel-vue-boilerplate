@@ -287,6 +287,17 @@ final class AccessScope
     }
 
     /**
+     * Drop the per-user grant memos only (called under the mutation lock, where earlier answers may predate a concurrent mutation).
+     * The super-admin role id stays: that row cannot change, and the rule memos are not consulted by the write path.
+     */
+    public function forgetGrants(): void
+    {
+        $this->permissionIds = [];
+        $this->permissionNames = [];
+        $this->superAdmin = [];
+    }
+
+    /**
      * Drop everything (called after access mutations mid-request).
      */
     public function flush(): void

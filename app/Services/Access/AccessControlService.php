@@ -638,18 +638,19 @@ final readonly class AccessControlService
 
 
     /**
-     * Run a mutation under the shared lock and enforce the invariants before commit; throwing rolls the whole mutation back.
-     * The target is part of the signature so no mutation can silently skip the tier decision: user-directed methods
-     * pass their target, role/rule methods pass null.
-     * The tier is checked inside the transaction, after the lock, so it reads state no concurrent mutation is changing.
-     * Pre-mutation state is snapshotted so the lockout guards only fire for what the mutation itself broke: self-revocation
-     * for grants the actor actually held, last-holder for permissions that still had an active holder.
+     * Run a mutation under the shared lock and enforce the invariants before commit; throwing rolls it all back.
+     *
+     * The target is part of the signature so no mutation can skip the tier decision: user-directed methods pass theirs, role/rule methods pass null.
+     * The ceilings run after the lock on grants re-read under it, since anything answered earlier may predate a mutation the lock waited on.
+     * Pre-mutation state is snapshot so the lockout guards fire only for what the mutation itself broke.
      * Permission caches are flushed after commit.
      */
     private function mutate(User $actor, ?User $target, Closure $callback): mixed
     {
         $result = DB::transaction(function () use ($actor, $target, $callback) {
             $permissions = $this->lockLockoutPermissionRows();
+
+            $this->forgetAuthorizationReadBeforeLock($actor, $target);
 
             if ($target !== null) {
                 $this->assertTargetWithinTier($actor, $target);
@@ -686,6 +687,23 @@ final readonly class AccessControlService
         $this->access->flush();
 
         return $result;
+    }
+
+    /**
+     * Drop every authorization answer produced before the lock was held.
+     *
+     * The lock may have waited on another mutation, so grants read earlier in the request may since have been revoked or added.
+     * Those answers live in two per-request places - the AccessScope memos and the roles/permissions relations loaded on
+     * the actor and target - so both are dropped and the ceilings re-read the pivots under the lock.
+     * The registrar's shared cache stays: nothing under the lock reads it, and forgetting it would rebuild it system-wide.
+     */
+    private function forgetAuthorizationReadBeforeLock(User $actor, ?User $target): void
+    {
+        foreach ([$actor, $target] as $user) {
+            $user?->unsetRelation('roles')->unsetRelation('permissions');
+        }
+
+        $this->access->forgetGrants();
     }
 
     /**

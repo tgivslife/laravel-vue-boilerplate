@@ -199,7 +199,9 @@ class AccessQueryBudgetTest extends AccessTestCase
             $counts[6],
             "One role cost {$counts[1]} queries and six cost {$counts[6]} - the ceiling is scaling per role.",
         );
-        $this->assertLessThanOrEqual(34, $counts[1], "A user role sync took {$counts[1]} queries.");
+        // Five of these re-read the actor's and target's grants under the lock, so a revocation committed while
+        // the request waited for it counts; the ceiling sits a few above the measured plan, as elsewhere here.
+        $this->assertLessThanOrEqual(39, $counts[1], "A user role sync took {$counts[1]} queries.");
     }
 
     public function test_a_mutation_resolves_the_super_admin_role_once(): void

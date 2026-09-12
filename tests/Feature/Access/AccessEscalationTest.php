@@ -4,7 +4,9 @@ namespace Tests\Feature\Access;
 
 use App\Models\User;
 use App\Services\Access\AccessControlService;
+use App\Services\Access\AccessScope;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Regression coverage for the privilege-escalation paths: the target ceiling (no mutation may
@@ -428,5 +430,82 @@ class AccessEscalationTest extends AccessTestCase
         $fresh = $target->fresh();
         $this->assertSame(['editors'], $fresh->roles()->pluck('name')->all());
         $this->assertSame([], $fresh->permissions()->pluck('name')->all());
+    }
+
+    /**
+     * The grant ceiling reads the actor's grants as they are under the lock, not as the request first loaded them:
+     * a revocation another administrator committed while this one waited for the lock has to count.
+     */
+    public function test_a_grant_revoked_while_waiting_for_the_lock_cannot_be_handed_on(): void
+    {
+        $auditors = config('permission.models.role')::findOrCreate('auditors', config('access.guard'));
+        $auditors->givePermissionTo('roles.view');
+
+        $actor = $this->userWithPermissions('users.manage');
+        $actor->assignRole($auditors);
+        $target = $this->createUser();
+
+        // What the request answered before the lock: relations loaded by the gate, the memo warmed by a policy.
+        $this->warmAuthorization($actor);
+
+        // Meanwhile, from another request, the granting role is removed.
+        User::query()->find($actor->getKey())->removeRole($auditors);
+
+        $this->expectValidationMessage(
+            fn() => app(AccessControlService::class)->syncUserPermissions($actor, $target, [
+                $this->permission('roles.view')->getKey(),
+            ]),
+            __('api.access.grant_above_ceiling'),
+        );
+
+        $this->assertFalse($target->fresh()->hasDirectPermission('roles.view'));
+    }
+
+    /**
+     * The target ceiling reads the target the same way: a privileged grant that landed on them while the actor
+     * waited for the lock puts them out of reach before the mutation runs.
+     */
+    public function test_a_target_promoted_while_waiting_for_the_lock_is_out_of_reach(): void
+    {
+        $actor = $this->userWithPermissions('users.manage');
+        $target = $this->createUser();
+
+        $this->warmAuthorization($actor);
+        $this->warmAuthorization($target);
+
+        User::query()->find($target->getKey())->givePermissionTo('settings.manage');
+
+        $this->expectValidationMessage(
+            fn() => app(AccessControlService::class)->updateUserAccount($actor, $target, ['first_name' => 'Hijacked']),
+            __('api.access.target_above_tier'),
+        );
+
+        $this->assertNotSame('Hijacked', $target->fresh()->first_name);
+    }
+
+    /**
+     * Load and memoize the user's grants the way an earlier part of the request would have.
+     */
+    private function warmAuthorization(User $user): void
+    {
+        $user->load(['roles.permissions', 'permissions']);
+        app(AccessScope::class)->permissionNames($user);
+        app(AccessScope::class)->isSuperAdmin($user);
+    }
+
+    /**
+     * @param  callable(): mixed  $mutation
+     */
+    private function expectValidationMessage(callable $mutation, string $message): void
+    {
+        try {
+            $mutation();
+        } catch (ValidationException $exception) {
+            $this->assertContains($message, $exception->validator->errors()->all());
+
+            return;
+        }
+
+        $this->fail('The mutation was accepted.');
     }
 }
