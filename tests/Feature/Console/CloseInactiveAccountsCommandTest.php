@@ -8,11 +8,14 @@ use App\Notifications\InactivityNoticeNotification;
 use App\Services\Settings\AppSettings;
 use Closure;
 use Illuminate\Database\Events\TransactionBeginning;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\AnonymousNotifiable;
+use Illuminate\Notifications\SendQueuedNotifications;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Support\Facades\Queue;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
@@ -225,6 +228,64 @@ class CloseInactiveAccountsCommandTest extends TestCase
                 DB::table('users')->where('id', $user->getKey())->update($change());
             }
         });
+    }
+
+    /**
+     * The queue connection's after_commit setting, which must not matter: the push is forced ahead of the commit
+     * either way, so a failed push still rolls the stamp back.
+     *
+     * @return array<string, array{0: bool}>
+     */
+    public static function afterCommitSettings(): array
+    {
+        return [
+            'push at once' => [false],
+            'push after commit' => [true],
+        ];
+    }
+
+    /**
+     * A warning the queue refuses must not leave the stamp that says it was sent, or the account is closed unwarned
+     * once the stamp ages. The stamp rolls back, the run fails, the candidates behind it are untouched, and the next
+     * run with the queue back warns them all. Exercised with a real push failure - a database queue on a table that
+     * does not exist - rather than a faked one, so the push actually happens inside the transaction.
+     */
+    #[DataProvider('afterCommitSettings')]
+    public function test_a_warning_the_queue_refuses_leaves_the_account_unstamped_for_the_next_run(bool $afterCommit
+    ): void {
+        $this->enablePolicy();
+        $first = $this->lastLoggedInDaysAgo($this->createUser(), 400);
+        $second = $this->lastLoggedInDaysAgo($this->createUser(), 400);
+        config([
+            'queue.default' => 'database',
+            'queue.connections.database.table' => 'missing_jobs',
+            'queue.connections.database.after_commit' => $afterCommit,
+        ]);
+
+        try {
+            $this->artisan('access:close-inactive-accounts')->run();
+            $this->fail('Expected the refused push to fail the run.');
+        } catch (QueryException) {
+            // The queue table is missing: the push failed as a queue outage would.
+        }
+
+        $this->assertNull($first->refresh()->inactivity_notice_sent_at);
+        $this->assertNull($second->refresh()->inactivity_notice_sent_at);
+
+        // The queue is back: both are warned, and the push does not wait for a commit.
+        Queue::fake();
+
+        $this->artisan('access:close-inactive-accounts')
+            ->expectsOutputToContain('Closed 0 accounts; sent 2 closure notices.')
+            ->assertSuccessful();
+
+        Queue::assertPushed(SendQueuedNotifications::class, 2);
+        Queue::assertPushed(
+            SendQueuedNotifications::class,
+            static fn(SendQueuedNotifications $job): bool => $job->afterCommit === false,
+        );
+        $this->assertNotNull($first->refresh()->inactivity_notice_sent_at);
+        $this->assertNotNull($second->refresh()->inactivity_notice_sent_at);
     }
 
     public function test_a_dry_run_reports_both_phases_without_touching_anything(): void

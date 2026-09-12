@@ -13,6 +13,7 @@ use Illuminate\Console\Attributes\Description;
 use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Validation\ValidationException;
 
@@ -151,10 +152,10 @@ class CloseInactiveAccountsCommand extends Command
     /**
      * Send the pre-closure warning to every notice candidate and stamp it sent.
      *
-     * The stamp is one conditional update through the same criteria, and its success is the notice decision: a row
-     * no longer matching is withdrawn and gets no mail. Written without timestamps, like the last-login summary.
-     * The announced date is the earliest the closure phase can act on the stamp, so the mail's promise holds exactly;
-     * last holders get no notice, since it would promise a closure the command will refuse.
+     * The stamp is a conditional update through the same criteria - a row no longer matching is withdrawn - in one
+     * transaction with the enqueue, the push forced ahead of the commit: a refused push rolls the stamp back and
+     * fails the run, so the account is warned next run rather than closed unwarned. Last holders get no notice,
+     * since it would promise a closure the command will refuse.
      *
      * @param  list<int>  $lastHolderIds
      * @return array{0: int, 1: int, 2: int} noticed, withdrawn and held back
@@ -171,19 +172,26 @@ class CloseInactiveAccountsCommand extends Command
             ->chunkById(100,
                 function ($users) use ($inactiveDays, $noticeDays, $closureDate, &$noticed, &$withdrawn): void {
                     foreach ($users as $user) {
-                        $stamped = User::withoutTimestamps(fn(): int => $this
-                            ->noticeCriteria(User::query()->whereKey($user->getKey()), $inactiveDays, $noticeDays)
-                            ->update(['inactivity_notice_sent_at' => now()]));
+                        $stamped = DB::transaction(function () use (
+                            $user,
+                            $inactiveDays,
+                            $noticeDays,
+                            $closureDate
+                        ): bool {
+                            $matched = User::withoutTimestamps(fn(): int => $this
+                                ->noticeCriteria(User::query()->whereKey($user->getKey()), $inactiveDays, $noticeDays)
+                                ->update(['inactivity_notice_sent_at' => now()]));
 
-                        if ($stamped !== 1) {
-                            $withdrawn++;
+                            if ($matched !== 1) {
+                                return false;
+                            }
 
-                            continue;
-                        }
+                            $user->notify(new InactivityNoticeNotification($closureDate)->beforeCommit());
 
-                        $user->notify(new InactivityNoticeNotification($closureDate));
+                            return true;
+                        });
 
-                        $noticed++;
+                        $stamped ? $noticed++ : $withdrawn++;
                     }
                 });
 
