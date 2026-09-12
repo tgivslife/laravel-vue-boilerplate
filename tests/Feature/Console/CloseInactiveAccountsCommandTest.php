@@ -6,9 +6,14 @@ use App\Models\User;
 use App\Notifications\InactivityClosedNotification;
 use App\Notifications\InactivityNoticeNotification;
 use App\Services\Settings\AppSettings;
+use Closure;
+use Illuminate\Database\Events\TransactionBeginning;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Notifications\AnonymousNotifiable;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Notification;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Tests\TestCase;
 
 class CloseInactiveAccountsCommandTest extends TestCase
@@ -141,6 +146,85 @@ class CloseInactiveAccountsCommandTest extends TestCase
 
         $this->assertFalse($user->refresh()->trashed());
         Notification::assertNotSentTo($user, InactivityClosedNotification::class);
+    }
+
+    /**
+     * The batch is planned from a chunk of loaded rows; the account changes between that load and its own closure.
+     * Every closure condition must be decided on the row as it is then, not on the chunk's copy.
+     *
+     * @return array<string, array{0: Closure(): array<string, mixed>}>
+     */
+    public static function changesSinceThePlan(): array
+    {
+        return [
+            'a sign-in' => [static fn(): array => ['last_login_at' => now(), 'inactivity_notice_sent_at' => null]],
+            'a deactivation' => [static fn(): array => ['is_active' => false]],
+            'a ban' => [static fn(): array => ['banned_at' => now()]],
+        ];
+    }
+
+    /**
+     * The closure decides under its lock, so the change lands at the moment its transaction begins: after the chunk
+     * was loaded, before the row is re-read. Rechecked eligibility is what this proves, not lock contention.
+     *
+     * @param  Closure(): array<string, mixed>  $change
+     */
+    #[DataProvider('changesSinceThePlan')]
+    public function test_a_change_between_the_plan_and_the_closure_withdraws_it(Closure $change): void
+    {
+        Notification::fake();
+        $this->enablePolicy();
+        $user = $this->noticedDaysAgo($this->lastLoggedInDaysAgo($this->createUser(), 400), 31);
+        $this->changeOnce(TransactionBeginning::class, $user, $change);
+
+        $this->artisan('access:close-inactive-accounts')
+            ->expectsOutputToContain('Closed 0 accounts; sent 0 closure notices.')
+            ->expectsOutputToContain('Withdrawn 1 accounts')
+            ->assertSuccessful();
+
+        $this->assertFalse($user->refresh()->trashed());
+        $this->assertDatabaseMissing('access_audit_logs', ['action' => 'user.inactivity_closed']);
+        Notification::assertNothingSent();
+    }
+
+    /**
+     * The notice phase has no transaction; the change lands as the chunk retrieves the row, before the stamp.
+     * The conditional stamp finds nothing to stamp, and no notice promises a closure the change already withdrew.
+     *
+     * @param  Closure(): array<string, mixed>  $change
+     */
+    #[DataProvider('changesSinceThePlan')]
+    public function test_a_change_between_the_plan_and_the_notice_withdraws_it(Closure $change): void
+    {
+        Notification::fake();
+        $this->enablePolicy();
+        $user = $this->lastLoggedInDaysAgo($this->createUser(), 400);
+        $this->changeOnce('eloquent.retrieved: '.User::class, $user, $change);
+
+        $this->artisan('access:close-inactive-accounts')
+            ->expectsOutputToContain('Closed 0 accounts; sent 0 closure notices.')
+            ->expectsOutputToContain('Withdrawn 1 accounts')
+            ->assertSuccessful();
+
+        $this->assertNull($user->refresh()->inactivity_notice_sent_at);
+        Notification::assertNothingSent();
+    }
+
+    /**
+     * Write the change straight to the account's row the first time the event fires, as a concurrent request would.
+     *
+     * @param  Closure(): array<string, mixed>  $change
+     */
+    private function changeOnce(string $event, User $user, Closure $change): void
+    {
+        $applied = false;
+
+        Event::listen($event, static function () use ($user, $change, &$applied): void {
+            if (!$applied) {
+                $applied = true;
+                DB::table('users')->where('id', $user->getKey())->update($change());
+            }
+        });
     }
 
     public function test_a_dry_run_reports_both_phases_without_touching_anything(): void

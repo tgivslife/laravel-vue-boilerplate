@@ -379,30 +379,52 @@ final readonly class AccessControlService
      * Retire the account for inactivity (access:close-inactive-accounts), audited as user.inactivity_closed with the
      * account itself as actor. Refused like the self-service delete when the account is a last active holder.
      *
+     * The row is re-selected under the lock through the closure criteria and retired as found: one that no longer
+     * matches (signed in, deactivated or banned since the batch was planned) is left alone and answered with false.
+     *
+     * @param  Closure(Builder<User>): Builder<User>  $stillEligible  The closure criteria, applied to the account's own row.
+     *
      * @throws ValidationException When the account is the last active holder of a lockout permission.
      */
-    public function closeInactiveAccount(User $user): void
+    public function closeInactiveAccount(User $user, Closure $stillEligible): bool
     {
-        $this->retireOnOwnBehalf($user, 'user.inactivity_closed');
+        return (bool) $this->mutate($user, $user, function () use ($user, $stillEligible): bool {
+            /** @var User|null $fresh */
+            $fresh = $stillEligible(User::query()->whereKey($user->getKey())->lockForUpdate())->first();
+
+            if ($fresh === null) {
+                return false;
+            }
+
+            $this->retireAsOwner($fresh, 'user.inactivity_closed');
+
+            return true;
+        }, retires: $user);
     }
 
     /**
      * The two doors without a human administrator: the account is actor and target, the last-holder guard still applies,
      * the self-revocation guard does not - losing one's own grants is what leaving means.
-     * The before-snapshot keeps the original address, which the retirement tombstones.
      */
     private function retireOnOwnBehalf(User $user, string $action): void
     {
-        $this->mutate($user, $user, function () use ($user, $action): void {
-            $before = [
-                'email' => $user->email,
-                'roles' => $user->roles->pluck('name')->sort()->values()->all(),
-            ];
+        $this->mutate($user, $user, fn() => $this->retireAsOwner($user, $action), retires: $user);
+    }
 
-            $this->retirement->retire($user);
+    /**
+     * Retire the account under the lock with itself as actor. The before-snapshot keeps the original address, which
+     * the retirement tombstones.
+     */
+    private function retireAsOwner(User $user, string $action): void
+    {
+        $before = [
+            'email' => $user->email,
+            'roles' => $user->roles->pluck('name')->sort()->values()->all(),
+        ];
 
-            $this->audit($user, $action, $user, $before, null);
-        }, retires: $user);
+        $this->retirement->retire($user);
+
+        $this->audit($user, $action, $user, $before, null);
     }
 
     /**
@@ -712,13 +734,13 @@ final readonly class AccessControlService
     /**
      * Run a mutation under the shared lock and enforce the invariants before commit; throwing rolls it all back.
      *
-     * The target is part of the signature so no mutation can skip the tier decision: user-directed methods pass theirs, role/rule methods pass null.
-     * The ceilings run after the lock on grants re-read under it, and the lockout guards compare against
-     * a pre-mutation snapshot, so they fire only for what the mutation itself broke.
-     * A retirement names the account it retires: that one is refused as a last holder before the callback runs, since
-     * sessions die outside the transaction; when it is the actor, self-revocation does not apply and the refusal is worded for the owner.
-     * After commit the scope memos are flushed, and the registrar's shared cache only when the mutation
-     * edits roles - it holds permissions and role mappings, never a user's own assignments.
+     * The target is part of the signature so no mutation can skip the tier decision: user-directed methods pass theirs, role and rule methods null.
+     * The ceilings run on grants re-read under the lock, and the lockout guards compare against a pre-mutation snapshot,
+     * so they fire only for what the mutation itself broke.
+     * A retirement names the account it retires, refused as a last holder before the callback runs, since sessions die outside
+     * the transaction; retiring the actor, self-revocation does not apply and the refusal is worded for the owner.
+     * After commit the scope memos are flushed; the registrar's shared cache only when roles were edited, since it
+     * holds permissions and role mappings, never a user's own assignments.
      */
     private function mutate(
         User $actor,
