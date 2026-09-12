@@ -194,6 +194,31 @@ class TwoFactorEnrollmentTest extends TestCase
         $this->assertDatabaseMissing('access_audit_logs', ['action' => 'user.two_factor_disabled']);
     }
 
+    /**
+     * The request's user instance still holds the pending enrollment (the test guard keeps the instance it signed in
+     * with, standing in for a request that loaded the user before the confirmation landed), but the factor is active
+     * by the time the disable runs: it must be treated as the loss of an active factor - audited and mailed.
+     */
+    public function test_disabling_from_a_stale_snapshot_still_audits_and_mails_the_active_factor(): void
+    {
+        Notification::fake();
+
+        $user = $this->createUser();
+        $this->actingAsStateful($user);
+
+        $secret = $this->postJson('/api/two-factor', ['password' => 'password'])->json('data.secret');
+        $this->twoFactor->confirmEnrollment(User::query()->find($user->getKey()), $this->engine->getCurrentOtp($secret));
+
+        $this->deleteJson('/api/two-factor', ['password' => 'password'])->assertOk();
+
+        $fresh = $user->fresh();
+        $this->assertNull($fresh->two_factor_secret);
+        $this->assertNull($fresh->two_factor_recovery_codes);
+        $this->assertNull($fresh->two_factor_confirmed_at);
+        $this->assertDatabaseHas('access_audit_logs', ['action' => 'user.two_factor_disabled', 'actor_id' => $user->id]);
+        Notification::assertSentTo($user, TwoFactorDisabledNotification::class);
+    }
+
     public function test_the_kill_switch_removes_the_endpoints(): void
     {
         config(['security.two_factor.enabled' => false]);

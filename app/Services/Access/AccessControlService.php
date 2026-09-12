@@ -2,6 +2,7 @@
 
 namespace App\Services\Access;
 
+use App\Enums\TwoFactorState;
 use App\Models\Access\RequiredPermission;
 use App\Models\User;
 use App\Notifications\TwoFactorDisabledNotification;
@@ -300,13 +301,14 @@ final readonly class AccessControlService
     public function resetTwoFactor(User $actor, User $target): void
     {
         $wasEnrolled = $this->mutate($actor, $target, function () use ($actor, $target): bool {
-            if ($target->two_factor_secret === null) {
+            // The state the clear found, not this request's snapshot of the target.
+            $state = $this->twoFactor->disable($target);
+
+            if ($state === TwoFactorState::None) {
                 return false;
             }
 
-            $before = ['two_factor_enabled' => $target->hasTwoFactorEnabled()];
-
-            $this->twoFactor->disable($target);
+            $before = ['two_factor_enabled' => $state === TwoFactorState::Active];
 
             $this->audit($actor, 'user.two_factor_reset', $target, $before, ['two_factor_enabled' => false]);
 

@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Settings;
 
+use App\Enums\TwoFactorState;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Settings\TwoFactorConfirmRequest;
 use App\Http\Requests\Settings\TwoFactorDisableRequest;
@@ -117,9 +118,8 @@ class TwoFactorController extends Controller
         $this->assertFeatureEnabled();
 
         // Discarding a never-confirmed setup is not a security event; only the loss of an active factor is worth a mail.
-        $wasActive = $request->user()->hasTwoFactorEnabled();
-
-        $this->twoFactor->disable($request->user());
+        // The state comes from the clear itself, not from this request's snapshot of the user.
+        $wasActive = $this->twoFactor->disable($request->user()) === TwoFactorState::Active;
 
         if ($wasActive) {
             $this->auditor->record(
