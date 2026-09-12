@@ -9,6 +9,7 @@ use App\Services\Auth\MagicLinkService;
 use App\Services\Auth\SessionRegistry;
 use App\Services\Auth\TwoFactorService;
 use Closure;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Collection;
@@ -31,7 +32,9 @@ use Spatie\Permission\PermissionRegistrar;
  *    including indirectly, through a role edit that would strip a privileged permission from such an account or hand it one;
  *  - grant ceiling: permissions and roles being added must sit within what the actor effectively holds.
  *
- * The lockout invariants hold independently for each configured lockout permission.
+ * The lockout invariants hold independently for each configured lockout permission. The self-service delete and the
+ * inactivity closure retire accounts under the same lock and last-holder guard; self-revocation does not apply to an
+ * account that is leaving.
  */
 final readonly class AccessControlService
 {
@@ -356,7 +359,66 @@ final readonly class AccessControlService
             $this->retirement->retire($target);
 
             $this->audit($actor, 'user.deleted', $target, $before, null);
-        });
+        }, retires: $target);
+    }
+
+    /**
+     * Retire the account at its owner's request (the settings page), audited as user.self_deleted with the owner as actor.
+     * Refused when the account is the last active holder of a lockout permission: nobody would be left to administer it.
+     *
+     * @throws ValidationException When the account is the last active holder of a lockout permission.
+     */
+    public function deleteOwnAccount(User $user): void
+    {
+        $this->retireOnOwnBehalf($user, 'user.self_deleted');
+    }
+
+    /**
+     * Retire the account for inactivity (access:close-inactive-accounts), audited as user.inactivity_closed with the
+     * account itself as actor. Refused like the self-service delete when the account is a last active holder.
+     *
+     * @throws ValidationException When the account is the last active holder of a lockout permission.
+     */
+    public function closeInactiveAccount(User $user): void
+    {
+        $this->retireOnOwnBehalf($user, 'user.inactivity_closed');
+    }
+
+    /**
+     * The two doors without a human administrator: the account is actor and target, the last-holder guard still applies,
+     * the self-revocation guard does not - losing one's own grants is what leaving means.
+     * The before-snapshot keeps the original address, which the retirement tombstones.
+     */
+    private function retireOnOwnBehalf(User $user, string $action): void
+    {
+        $this->mutate($user, $user, function () use ($user, $action): void {
+            $before = [
+                'email' => $user->email,
+                'roles' => $user->roles->pluck('name')->sort()->values()->all(),
+            ];
+
+            $this->retirement->retire($user);
+
+            $this->audit($user, $action, $user, $before, null);
+        }, retires: $user);
+    }
+
+    /**
+     * The accounts that are currently the only active holder of some lockout permission, read outside the lock.
+     * Advisory: callers planning a batch (the inactivity closure, its dry run) skip them, while the retirement itself still answers under the lock.
+     *
+     * @return list<int>
+     */
+    public function lastActiveHolderIds(): array
+    {
+        $snapshot = $this->holderSnapshot($this->lockoutPermissionQuery()->get(), $this->access->superAdminRoleId());
+
+        return collect($snapshot['active_ids'])
+            ->filter(static fn(array $ids): bool => count($ids) === 1)
+            ->flatten()
+            ->unique()
+            ->values()
+            ->all();
     }
 
     /**
@@ -542,14 +604,14 @@ final readonly class AccessControlService
      *
      * @param  Collection<int, PermissionContract>  $permissions
      * @param  int|null  $superAdminRoleId  resolved by the caller so one mutation resolves it once, not per snapshot
-     * @return array{holders: array<int, list<int>>, active: array<int, int>}
+     * @return array{holders: array<int, list<int>>, active_ids: array<int, list<int>>, active: array<int, int>}
      */
     private function holderSnapshot(Collection $permissions, ?int $superAdminRoleId): array
     {
         $permissionIds = $permissions->map(static fn(PermissionContract $p): int => (int) $p->getKey())->all();
 
         if ($permissionIds === []) {
-            return ['holders' => [], 'active' => []];
+            return ['holders' => [], 'active_ids' => [], 'active' => []];
         }
 
         $tables = config('permission.table_names');
@@ -607,17 +669,23 @@ final readonly class AccessControlService
             $holders[$permissionId] = array_values(array_unique($ids));
         }
 
-        return ['holders' => $holders, 'active' => $this->activeCounts($holders)];
+        $activeIds = $this->activeHolders($holders);
+
+        return [
+            'holders' => $holders,
+            'active_ids' => $activeIds,
+            'active' => array_map('count', $activeIds),
+        ];
     }
 
     /**
-     * How many of each permission's holders can still act, counted with one query over the union of them all
+     * Which of each permission's holders can still act, found with one query over the union of them all
      * rather than one per permission.
      *
      * @param  array<int, list<int>>  $holders
-     * @return array<int, int>
+     * @return array<int, list<int>>
      */
-    private function activeCounts(array $holders): array
+    private function activeHolders(array $holders): array
     {
         $everyHolder = array_values(array_unique(array_merge(...array_values($holders))));
 
@@ -632,7 +700,8 @@ final readonly class AccessControlService
         );
 
         return array_map(
-            static fn(array $ids): int => count(array_filter($ids, static fn(int $id): bool => isset($active[$id]))),
+            static fn(array $ids): array => array_values(array_filter($ids,
+                static fn(int $id): bool => isset($active[$id]))),
             $holders,
         );
     }
@@ -642,14 +711,23 @@ final readonly class AccessControlService
      * Run a mutation under the shared lock and enforce the invariants before commit; throwing rolls it all back.
      *
      * The target is part of the signature so no mutation can skip the tier decision: user-directed methods pass theirs, role/rule methods pass null.
-     * The ceilings run after the lock on grants re-read under it, since anything answered earlier may predate a mutation the lock waited on.
-     * Pre-mutation state is snapshot so the lockout guards fire only for what the mutation itself broke.
-     * The scope memos are flushed after commit; the registrar's shared cache only when the mutation edits roles,
-     * since it holds permissions and their role mappings, never a user's own assignments.
+     * The ceilings run after the lock on grants re-read under it, and the lockout guards compare against
+     * a pre-mutation snapshot, so they fire only for what the mutation itself broke.
+     * A retirement names the account it retires: that one is refused as a last holder before the callback runs, since
+     * sessions die outside the transaction; when it is the actor, self-revocation does not apply and the refusal is worded for the owner.
+     * After commit the scope memos are flushed, and the registrar's shared cache only when the mutation
+     * edits roles - it holds permissions and role mappings, never a user's own assignments.
      */
-    private function mutate(User $actor, ?User $target, Closure $callback, bool $editsRoles = false): mixed
-    {
-        $result = DB::transaction(function () use ($actor, $target, $callback) {
+    private function mutate(
+        User $actor,
+        ?User $target,
+        Closure $callback,
+        bool $editsRoles = false,
+        ?User $retires = null
+    ): mixed {
+        $retiresActor = $retires !== null && $retires->is($actor);
+
+        $result = DB::transaction(function () use ($actor, $target, $callback, $retires, $retiresActor) {
             $permissions = $this->lockLockoutPermissionRows();
 
             $this->rereadGrantsUnderLock($actor, $target);
@@ -663,13 +741,17 @@ final readonly class AccessControlService
 
             $before = $this->holderSnapshot($permissions, $superAdminRoleId);
 
+            if ($retires !== null) {
+                $this->assertNotLastActiveHolder($retires, $permissions, $before['active_ids'], $retiresActor);
+            }
+
             $heldBefore = [];
             $activeBefore = [];
 
             foreach ($permissions as $permission) {
                 $key = (int) $permission->getKey();
 
-                if (in_array((int) $actor->getKey(), $before['holders'][$key] ?? [], true)) {
+                if (!$retiresActor && in_array((int) $actor->getKey(), $before['holders'][$key] ?? [], true)) {
                     $heldBefore[] = $key;
                 }
 
@@ -680,7 +762,8 @@ final readonly class AccessControlService
 
             $result = $callback();
 
-            $this->assertStillManageable($actor, $permissions, $superAdminRoleId, $heldBefore, $activeBefore);
+            $this->assertStillManageable($actor, $permissions, $superAdminRoleId, $heldBefore, $activeBefore,
+                $retiresActor);
 
             return $result;
         });
@@ -719,11 +802,44 @@ final readonly class AccessControlService
      */
     private function lockLockoutPermissionRows(): Collection
     {
-        return $this->permissionModel()::whereIn('name', config('access.lockout_permissions', []))
+        return $this->lockoutPermissionQuery()->lockForUpdate()->get();
+    }
+
+    /**
+     * The configured lockout permissions in the configured guard, ordered by id.
+     *
+     * @return Builder<Model&PermissionContract>
+     */
+    private function lockoutPermissionQuery(): Builder
+    {
+        /** @var Builder<Model&PermissionContract> $query */
+        $query = $this->permissionModel()::query();
+
+        return $query->whereIn('name', config('access.lockout_permissions', []))
             ->where('guard_name', config('access.guard'))
-            ->orderBy('id')
-            ->lockForUpdate()
-            ->get();
+            ->orderBy('id');
+    }
+
+    /**
+     * Refuse to retire an account that is the only active holder of a lockout permission, before anything runs.
+     *
+     * @param  Collection<int, PermissionContract>  $permissions
+     * @param  array<int, list<int>>  $activeIds  the pre-mutation active holders per permission
+     * @param  bool  $retiresActor  whether the account is the actor, which words the refusal for them
+     */
+    private function assertNotLastActiveHolder(
+        User $account,
+        Collection $permissions,
+        array $activeIds,
+        bool $retiresActor
+    ): void {
+        foreach ($permissions as $permission) {
+            if (($activeIds[(int) $permission->getKey()] ?? []) === [(int) $account->getKey()]) {
+                throw ValidationException::withMessages([
+                    'access' => __($retiresActor ? 'api.access.last_manager_self' : 'api.access.last_manager'),
+                ]);
+            }
+        }
     }
 
     /**
@@ -731,13 +847,15 @@ final readonly class AccessControlService
      * @param  int|null  $superAdminRoleId  resolved once by mutate() and reused, rather than looked up again here
      * @param  list<int>  $heldBefore  ids of the lockout permissions the actor held pre-mutation
      * @param  list<int>  $activeBefore  ids of the lockout permissions that had an active holder pre-mutation
+     * @param  bool  $retiresActor  whether the actor is the account being retired, which words the refusal for them
      */
     private function assertStillManageable(
         User $actor,
         Collection $permissions,
         ?int $superAdminRoleId,
         array $heldBefore,
-        array $activeBefore
+        array $activeBefore,
+        bool $retiresActor = false
     ): void {
         $after = $this->holderSnapshot($permissions, $superAdminRoleId);
 
@@ -753,7 +871,7 @@ final readonly class AccessControlService
 
             if (in_array($key, $activeBefore, true) && ($after['active'][$key] ?? 0) === 0) {
                 throw ValidationException::withMessages([
-                    'access' => __('api.access.last_manager'),
+                    'access' => __($retiresActor ? 'api.access.last_manager_self' : 'api.access.last_manager'),
                 ]);
             }
         }

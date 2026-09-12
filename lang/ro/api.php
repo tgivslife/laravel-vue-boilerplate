@@ -271,6 +271,7 @@ return [
     'access' => [
         'self_revocation' => 'Această modificare ți-ar elimina o permisiune de administrare a accesului pe care te bazezi.',
         'last_manager' => 'Această modificare ar lăsa o permisiune protejată de acces fără niciun deținător activ.',
+        'last_manager_self' => 'Contul tău este singurul deținător activ al unei permisiuni protejate de acces. Predă-o mai întâi altui administrator.',
         'protected_role' => 'Rolul de super admin nu poate fi modificat sau șters.',
         'reserved_role_name' => 'Numele rolului de super admin este rezervat.',
         'super_admin_assignment' => 'Apartenența la rolul de super admin nu poate fi modificată prin API.',

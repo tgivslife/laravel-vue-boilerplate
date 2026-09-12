@@ -180,6 +180,32 @@ class AccessControlServiceTest extends AccessTestCase
         $this->assertTrue($target->fresh()->hasRole('editors'));
     }
 
+    /**
+     * The admin delete is refused for a last active holder before the retirement runs: sessions live outside the
+     * transaction, so a refusal after they were destroyed would leave the surviving account signed out everywhere.
+     */
+    public function test_deleting_the_last_active_holder_leaves_their_sessions_untouched(): void
+    {
+        $actor = $this->manager('user-admins');
+        $actor->forceFill(['is_active' => false])->save();
+
+        $target = $this->manager('role-admins', ['roles.manage']);
+        $target->createToken('cli-token');
+        $sessionId = $this->createOtherSessionFor($target);
+
+        try {
+            $this->service->deleteUser($actor, $target);
+            $this->fail('Expected the last-manager guard to fire.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(__('api.access.last_manager'), $exception->errors()['access'][0]);
+        }
+
+        $this->assertFalse($target->fresh()->trashed());
+        $this->assertSame(1, $target->tokens()->count());
+        $this->assertTrue($this->sessionExists($sessionId));
+        $this->assertDatabaseHas('user_sessions', ['session_id' => $sessionId]);
+    }
+
     public function test_removing_the_last_active_holder_of_a_lockout_permission_is_refused(): void
     {
         // The actor holds both lockout permissions (staying within the target's tier) but is

@@ -64,10 +64,11 @@ Consequences of the tombstone:
 - the audit `before`-snapshot retains the original address, so the trail keeps its answer to "whose account was
   deleted".
 
-Policy stays with each door: the admin delete refuses self-deletion, runs under the lockout invariants (deleting a
-lockout permission's last active holder is refused), and audits
-`user.deleted`; the self-service delete confirms with the password (or typed email for passwordless accounts), audits
-`user.self_deleted` with the owner as actor, and ends the requesting session.
+Every door runs under the guarded access transaction, so deleting a lockout permission's last active holder is
+refused whoever asks — the application must never be left without anyone able to administer that capability. Policy
+otherwise stays with each door: the admin delete refuses self-deletion and audits `user.deleted`; the self-service
+delete confirms with the password (or typed email for passwordless accounts), audits `user.self_deleted` with the
+owner as actor, and ends the requesting session.
 
 ### Inactivity closure
 
@@ -82,6 +83,9 @@ admin-editable `inactivity_closure` app setting (`{enabled, inactive_days, notic
   against a backlog of long-dead accounts;
 - deactivated and banned accounts are skipped: their owners cannot sign in to stop the clock, so their fate stays an
   administrator's decision;
+- the last active holder of a lockout permission is held back from both phases and reported in the command's output
+  (the dry run too); the retirement itself still answers under the lock, so a holder who becomes the last one between
+  the plan and the write is held back as well;
 - the closure is audited as `user.inactivity_closed` with the account itself as actor (the `user.self_provisioned`
   convention for events without a human administrator), and the confirmation mail is routed to the address snapshotted
   before the email was tombstoned.

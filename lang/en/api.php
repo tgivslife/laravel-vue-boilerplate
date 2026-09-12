@@ -271,6 +271,7 @@ return [
     'access' => [
         'self_revocation' => 'This change would remove an access administration permission you rely on.',
         'last_manager' => 'This change would leave a protected access permission without any active holder.',
+        'last_manager_self' => 'Your account is the only active holder of a protected access permission. Hand it to another administrator first.',
         'protected_role' => 'The super admin role cannot be modified or deleted.',
         'reserved_role_name' => 'The super admin role name is reserved.',
         'super_admin_assignment' => 'Super admin membership cannot be changed through the API.',

@@ -179,6 +179,79 @@ class CloseInactiveAccountsCommandTest extends TestCase
         Notification::assertNothingSent();
     }
 
+    /**
+     * The last active holder of a lockout permission is held back from both phases: closing them would leave nobody
+     * able to administer that capability, and a notice would promise a closure the command will refuse.
+     */
+    public function test_the_last_active_holder_of_a_lockout_permission_is_held_back(): void
+    {
+        Notification::fake();
+        $this->enablePolicy();
+        $holder = $this->noticedDaysAgo($this->lastLoggedInDaysAgo($this->holderOf('users.manage'), 400), 31);
+        $unnoticedHolder = $this->lastLoggedInDaysAgo($this->holderOf('roles.manage'), 400);
+        $other = $this->noticedDaysAgo($this->lastLoggedInDaysAgo($this->createUser(), 400), 31);
+
+        $this->artisan('access:close-inactive-accounts', ['--dry-run' => true])
+            ->expectsOutputToContain('[Dry run] Would close 1 accounts and send 0 closure notices.')
+            ->expectsOutputToContain('Held back 2 accounts')
+            ->assertSuccessful();
+
+        $this->artisan('access:close-inactive-accounts')
+            ->expectsOutputToContain('Closed 1 accounts; sent 0 closure notices.')
+            ->expectsOutputToContain('Held back 2 accounts')
+            ->assertSuccessful();
+
+        $this->assertTrue(User::withTrashed()->find($other->getKey())->trashed());
+        $this->assertFalse($holder->refresh()->trashed());
+        $this->assertNull($unnoticedHolder->refresh()->inactivity_notice_sent_at);
+        $this->assertDatabaseMissing('access_audit_logs', [
+            'action' => 'user.inactivity_closed',
+            'subject_id' => $holder->getKey(),
+        ]);
+        Notification::assertNotSentTo($unnoticedHolder, InactivityNoticeNotification::class);
+        Notification::assertSentOnDemandTimes(InactivityClosedNotification::class, 1);
+    }
+
+    /**
+     * Two inactive holders are neither the last one when the run is planned, but closing the first makes the second
+     * one: the retirement answers under the lock, so the second is held back rather than closed.
+     */
+    public function test_a_holder_who_becomes_the_last_one_during_the_run_is_held_back(): void
+    {
+        Notification::fake();
+        $this->enablePolicy();
+        $first = $this->noticedDaysAgo($this->lastLoggedInDaysAgo($this->holderOf('users.manage'), 400), 31);
+        $second = $this->noticedDaysAgo($this->lastLoggedInDaysAgo($this->holderOf('users.manage'), 400), 31);
+
+        $this->artisan('access:close-inactive-accounts')
+            ->expectsOutputToContain('Closed 1 accounts; sent 0 closure notices.')
+            ->expectsOutputToContain('Held back 1 accounts')
+            ->assertSuccessful();
+
+        $this->assertTrue(User::withTrashed()->find($first->getKey())->trashed());
+        $this->assertFalse($second->refresh()->trashed());
+        Notification::assertSentOnDemandTimes(InactivityClosedNotification::class, 1);
+    }
+
+    private function holderOf(string $permission): User
+    {
+        $user = $this->createUser();
+        $user->givePermissionTo(
+            config('permission.models.permission')::findOrCreate($permission, config('access.guard'))
+        );
+
+        return $user;
+    }
+
+    private function noticedDaysAgo(User $user, int $days): User
+    {
+        User::withoutTimestamps(function () use ($user, $days): void {
+            $user->forceFill(['inactivity_notice_sent_at' => now()->subDays($days)])->saveQuietly();
+        });
+
+        return $user;
+    }
+
     public function test_accounts_that_never_signed_in_are_measured_from_creation(): void
     {
         Notification::fake();

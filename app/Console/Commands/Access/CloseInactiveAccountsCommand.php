@@ -5,8 +5,7 @@ namespace App\Console\Commands\Access;
 use App\Models\User;
 use App\Notifications\InactivityClosedNotification;
 use App\Notifications\InactivityNoticeNotification;
-use App\Services\Access\AccessAuditor;
-use App\Services\Access\AccountRetirementService;
+use App\Services\Access\AccessControlService;
 use App\Services\Settings\AppSettings;
 use Closure;
 use Illuminate\Console\Attributes\Description;
@@ -14,8 +13,8 @@ use Illuminate\Console\Attributes\Signature;
 use Illuminate\Console\Command;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
+use Illuminate\Validation\ValidationException;
 
 #[Signature('access:close-inactive-accounts
     {--dry-run : Report how many accounts would be closed or noticed without touching anything}')]
@@ -31,15 +30,16 @@ class CloseInactiveAccountsCommand extends Command
      * - notice: accounts inactive for at least (inactive_days - notice_days) receive the pre-closure warning once,
      *   stamped in inactivity_notice_sent_at (a sign-in clears the stamp and withdraws the closure);
      * - closure: accounts whose stamp has aged past notice_days AND whose inactivity has reached inactive_days are
-     *   retired through the shared AccountRetirementService path.
+     *   retired through the guarded access transaction, which runs the shared AccountRetirementService path.
      *
      * The stamp ages the full notice window even when an account is already long past inactive_days
      * (the bulk case when the policy is first enabled), so no account is ever closed with less warning than the notice promised.
      *
      * Administratively frozen accounts (deactivated or banned) are skipped: their owners cannot sign in to stop the clock,
-     * and their fate is the administrator's decision.
+     * and their fate is the administrator's decision. So is the last active holder of a lockout permission, held back
+     * from both phases and reported: closing them would leave nobody able to administer that capability.
      */
-    public function handle(AppSettings $settings, AccountRetirementService $retirement, AccessAuditor $auditor): int
+    public function handle(AppSettings $settings, AccessControlService $accessControl): int
     {
         $policy = (array) $settings->get('inactivity_closure');
 
@@ -51,22 +51,35 @@ class CloseInactiveAccountsCommand extends Command
 
         $inactiveDays = (int) $policy['inactive_days'];
         $noticeDays = (int) $policy['notice_days'];
+        $lastHolderIds = $accessControl->lastActiveHolderIds();
 
         if ((bool) $this->option('dry-run')) {
-            $closable = $this->closureCandidates($inactiveDays, $noticeDays)->count();
-            $noticeable = $this->noticeCandidates($inactiveDays, $noticeDays)->count();
+            $closable = $this->closureCandidates($inactiveDays, $noticeDays)->whereNotIn('id', $lastHolderIds)->count();
+            $noticeable = $this->noticeCandidates($inactiveDays, $noticeDays)->whereNotIn('id',
+                $lastHolderIds)->count();
+            $heldBack = $this->closureCandidates($inactiveDays, $noticeDays)->whereIn('id', $lastHolderIds)->count()
+                + $this->noticeCandidates($inactiveDays, $noticeDays)->whereIn('id', $lastHolderIds)->count();
 
             $this->info("[Dry run] Would close {$closable} accounts and send {$noticeable} closure notices.");
+            $this->reportHeldBack($heldBack);
 
             return self::SUCCESS;
         }
 
-        $closed = $this->closeNoticedAccounts($inactiveDays, $noticeDays, $retirement, $auditor);
-        $noticed = $this->sendClosureNotices($inactiveDays, $noticeDays);
+        [$closed, $heldBack] = $this->closeNoticedAccounts($inactiveDays, $noticeDays, $lastHolderIds, $accessControl);
+        [$noticed, $heldBackFromNotice] = $this->sendClosureNotices($inactiveDays, $noticeDays, $lastHolderIds);
 
         $this->info("Closed {$closed} accounts; sent {$noticed} closure notices.");
+        $this->reportHeldBack($heldBack + $heldBackFromNotice);
 
         return self::SUCCESS;
+    }
+
+    private function reportHeldBack(int $count): void
+    {
+        if ($count > 0) {
+            $this->warn("Held back {$count} accounts: the last active holder of a protected access permission.");
+        }
     }
 
     /**
@@ -74,33 +87,37 @@ class CloseInactiveAccountsCommand extends Command
      *
      * Runs before the notice phase so a single run never closes an account off a stamp it wrote moments earlier.
      *
-     * Email and locale are snapshotted before retirement (the row's email is tombstoned by it), and the confirmation is routed on demand to that snapshot.
-     * The closure is audited as user.inactivity_closed with the account itself as actor - the same convention user.self_provisioned
-     * uses for events without a human administrator.
+     * Email and locale are snapshot before retirement (the row's email is tombstoned by it), and the confirmation is routed on demand to that snapshot.
+     * The closure runs through the guarded access transaction (AccessControlService::closeInactiveAccount), audited as
+     * user.inactivity_closed with the account itself as actor. The last holders planned around are excluded up front;
+     * one that became the last holder since the plan is refused under the lock and counted as held back the same way.
+     *
+     * @param  list<int>  $lastHolderIds
+     * @return array{0: int, 1: int} closed and held back
      */
     private function closeNoticedAccounts(
         int $inactiveDays,
         int $noticeDays,
-        AccountRetirementService $retirement,
-        AccessAuditor $auditor,
-    ): int {
+        array $lastHolderIds,
+        AccessControlService $accessControl,
+    ): array {
         $closed = 0;
+        $heldBack = $this->closureCandidates($inactiveDays, $noticeDays)->whereIn('id', $lastHolderIds)->count();
 
         $this->closureCandidates($inactiveDays, $noticeDays)
-            ->chunkById(100, function ($users) use ($retirement, $auditor, &$closed): void {
+            ->whereNotIn('id', $lastHolderIds)
+            ->chunkById(100, function ($users) use ($accessControl, &$closed, &$heldBack): void {
                 foreach ($users as $user) {
                     $email = $user->email;
                     $locale = $user->preferredLocale();
-                    $before = [
-                        'email' => $email,
-                        'roles' => $user->roles()->pluck('name')->sort()->values()->all(),
-                    ];
 
-                    DB::transaction(function () use ($user, $before, $retirement, $auditor): void {
-                        $retirement->retire($user);
+                    try {
+                        $accessControl->closeInactiveAccount($user);
+                    } catch (ValidationException) {
+                        $heldBack++;
 
-                        $auditor->record($user, 'user.inactivity_closed', $user, $before, null);
-                    });
+                        continue;
+                    }
 
                     Notification::route('mail', $email)
                         ->notify(new InactivityClosedNotification()->locale($locale));
@@ -109,7 +126,7 @@ class CloseInactiveAccountsCommand extends Command
                 }
             });
 
-        return $closed;
+        return [$closed, $heldBack];
     }
 
     /**
@@ -117,13 +134,19 @@ class CloseInactiveAccountsCommand extends Command
      *
      * The stamp is saved quietly and without timestamps, like the last-login summary: policy bookkeeping is not a profile update.
      * The announced date is the earliest the closure phase can act on this stamp, so the mail's promise holds exactly.
+     * Last holders get no notice either: the mail would promise a closure the command will refuse.
+     *
+     * @param  list<int>  $lastHolderIds
+     * @return array{0: int, 1: int} noticed and held back
      */
-    private function sendClosureNotices(int $inactiveDays, int $noticeDays): int
+    private function sendClosureNotices(int $inactiveDays, int $noticeDays, array $lastHolderIds): array
     {
         $closureDate = now()->addDays($noticeDays);
         $noticed = 0;
+        $heldBack = $this->noticeCandidates($inactiveDays, $noticeDays)->whereIn('id', $lastHolderIds)->count();
 
         $this->noticeCandidates($inactiveDays, $noticeDays)
+            ->whereNotIn('id', $lastHolderIds)
             ->chunkById(100, function ($users) use ($closureDate, &$noticed): void {
                 foreach ($users as $user) {
                     User::withoutTimestamps(function () use ($user): void {
@@ -136,7 +159,7 @@ class CloseInactiveAccountsCommand extends Command
                 }
             });
 
-        return $noticed;
+        return [$noticed, $heldBack];
     }
 
     /**

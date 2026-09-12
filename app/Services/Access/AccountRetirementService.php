@@ -4,20 +4,20 @@ namespace App\Services\Access;
 
 use App\Models\User;
 use App\Services\Auth\SessionRegistry;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * The retirement mechanics shared by the admin delete and the self-service delete.
+ * The retirement mechanics shared by every door: the admin delete, the self-service delete and the inactivity closure.
  *
- * Severs every credential (API tokens, magic-link and invitation tokens, OIDC identity links, session rows, remember token),
+ * Severs every credential (API tokens, magic-link and invitation tokens, OIDC identity links, sessions, remember token),
  * tombstones the email ({uuid}@deleted.invalid, with the keyed hash kept for membership lookups) and soft-deletes the row.
- * One code path on purpose: both doors must retire an account identically, whoever pulled the trigger.
+ * Identity links are deleted, not left behind: a dead account must not squat its provider subject against the person the tombstone freed.
+ * Sessions go after the caller's transaction commits - they live outside the database, so a refusal after this ran
+ * could not bring them back - and a failed sweep is reported, not thrown: the account is already retired and its sessions authenticate nobody.
  *
- * Identity links are deleted, not left behind: a dead account must not squat its provider subject,
- * or the person the tombstone freed could never provision or link that identity again.
- *
- * Policy and atomicity stay with the caller: the admin door runs this inside its guarded transaction
- * with its audit trail, the self-service door inside its own transaction plus the session logout.
+ * Policy and atomicity stay with the caller: every door runs this inside AccessControlService's guarded transaction,
+ * so no door can retire a lockout permission's last active holder.
  */
 readonly class AccountRetirementService
 {
@@ -35,7 +35,9 @@ readonly class AccountRetirementService
 
         $user->identities()->delete();
 
-        $this->sessionRegistry->destroyAll($user);
+        // Sessions live outside the database, so a rollback cannot bring them back: they go once the retirement is committed.
+        // By then the account is gone and its sessions resolve to nobody, so a failed sweep is reported, never a failed request.
+        DB::afterCommit(fn() => rescue(fn() => $this->sessionRegistry->destroyAll($user), report: true));
 
         User::withoutTimestamps(function () use ($user): void {
             $user->setRememberToken(Str::random(60));
