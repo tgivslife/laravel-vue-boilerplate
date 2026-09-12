@@ -4,6 +4,7 @@ namespace Tests\Feature\Access;
 
 use App\Http\Middleware\EnsureUserCanAuthenticate;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Notification;
 use Illuminate\Support\Facades\Password;
 use Tests\Support\UserAllowlistDimension;
@@ -521,33 +522,43 @@ class ImpersonationTest extends AccessTestCase
     /**
      * The borrowed session is the admin's browser: it is filed under them in the session registry, so
      * their revocations reach it and the target's session list never shows a device that is not theirs.
+     * The swap rotates the session id, and the row follows it rather than opening a second one.
      */
     public function test_the_borrowed_session_is_registered_under_the_actor(): void
     {
-        $actor = $this->actingAsImpersonator();
+        $actor = $this->userWithPermissions('users.impersonate');
         $target = $this->createUser();
+        $this->loginAndCarrySession($actor);
+        $rowId = $this->registryRowId($this->currentSessionId());
 
         $this->postJson("/api/access/users/{$target->id}/impersonate")->assertOk();
 
         $this->assertDatabaseHas('user_sessions', [
+            'id' => $rowId,
             'session_id' => $this->currentSessionId(),
             'user_id' => $actor->id,
         ]);
+        $this->assertSame(1, $this->liveSessionCount($actor));
         $this->assertDatabaseMissing('user_sessions', ['user_id' => $target->id]);
     }
 
     /**
      * Account recovery on the admin must not spare a session that answers as someone else: the reset
      * destroys the borrowed session outright, and a request on its cookie is cut off with the ended audit.
+     * The reset here runs on the borrowed session itself, which saves it back as it finishes: the tombstone
+     * on its row is what signs the next request out.
      */
     public function test_password_recovery_on_the_actor_destroys_the_borrowed_session(): void
     {
         Notification::fake();
 
-        $actor = $this->actingAsImpersonator();
+        $actor = $this->userWithPermissions('users.impersonate');
         $target = $this->createUser();
+        $this->loginAndCarrySession($actor);
 
-        $this->postJson("/api/access/users/{$target->id}/impersonate")->assertOk();
+        $swap = $this->postJson("/api/access/users/{$target->id}/impersonate");
+        $swap->assertOk();
+        $this->carrySessionCookieFrom($swap);
         $this->refreshGuards();
         $borrowedSessionId = $this->currentSessionId();
 
@@ -558,12 +569,15 @@ class ImpersonationTest extends AccessTestCase
             'password_confirmation' => 'Recovered-Passw0rd!',
         ])->assertOk();
 
-        $this->assertFalse($this->sessionExists($borrowedSessionId));
-        $this->assertDatabaseMissing('user_sessions', ['session_id' => $borrowedSessionId]);
+        $this->assertTrue(
+            DB::table('user_sessions')->where('session_id', $borrowedSessionId)->whereNotNull('revoked_at')->exists()
+        );
+        $this->assertSame(0, $this->liveSessionCount($actor));
 
-        // Belt and braces: a copy of the session the registry missed is refused on its pin.
+        // The next request on the cookie is signed out and the written-back copy destroyed.
         $this->refreshGuards();
         $this->getJson('/api/user')->assertUnauthorized();
+        $this->assertFalse($this->sessionExists($borrowedSessionId));
 
         $this->assertDatabaseHas('access_audit_logs', [
             'action' => 'user.impersonation_ended',
@@ -572,24 +586,53 @@ class ImpersonationTest extends AccessTestCase
         ]);
     }
 
+    /**
+     * A borrowed session signs out through the teardown, whose first step drops the registry row.
+     * When that fails, nothing else may have changed: the marker and its restrictions stay, rather than the session
+     * being saved as the target's own with no row to revoke it by.
+     */
+    public function test_a_teardown_that_cannot_drop_the_registry_row_leaves_the_borrowed_session_as_it_was(): void
+    {
+        $actor = $this->userWithPermissions('users.impersonate');
+        $target = $this->createUser();
+        $this->loginAndCarrySession($actor);
+
+        $swap = $this->postJson("/api/access/users/{$target->id}/impersonate");
+        $swap->assertOk();
+        $this->carrySessionCookieFrom($swap);
+        $rowId = $this->registryRowId($this->currentSessionId());
+
+        $this->failRegistryWrites('DELETE');
+        $this->postJson('/api/logout')->assertStatus(500);
+        $this->refreshGuards();
+
+        $this->getJson('/api/user')
+            ->assertOk()
+            ->assertJsonPath('data.id', $target->id)
+            ->assertJsonPath('data.impersonation.actor_id', $actor->id);
+        $this->assertDatabaseHas('user_sessions', ['id' => $rowId, 'user_id' => $actor->id, 'revoked_at' => null]);
+        $this->assertDatabaseMissing('access_audit_logs', ['action' => 'user.impersonation_ended']);
+    }
+
     public function test_the_actors_other_sessions_revocation_reaches_the_borrowed_session(): void
     {
-        $actor = $this->actingAsImpersonator();
+        $actor = $this->userWithPermissions('users.impersonate');
         $target = $this->createUser();
+        $this->loginAndCarrySession($actor);
 
         $this->postJson("/api/access/users/{$target->id}/impersonate")->assertOk();
         $borrowedSessionId = $this->currentSessionId();
 
-        // The admin, back on a session of their own, signs out everything else.
+        // The admin, from another browser on a session of their own, signs out everything else.
+        $this->dropSessionCookie();
         $this->flushSession();
         $this->refreshGuards();
-        $this->actingAsStateful($actor);
+        $this->loginAndCarrySession($actor);
         $this->refreshGuards();
 
         $this->deleteJson('/api/sessions/others', ['password' => 'password'])->assertOk();
 
-        $this->assertFalse($this->sessionExists($borrowedSessionId));
-        $this->assertDatabaseMissing('user_sessions', ['session_id' => $borrowedSessionId]);
+        $this->assertSessionRevoked($borrowedSessionId);
     }
 
     /**
@@ -672,8 +715,8 @@ class ImpersonationTest extends AccessTestCase
     }
 
     /**
-     * The id the test client's session ended the last request with. Requests carry no cookie, so
-     * this is the only handle on the session that was just written.
+     * The id the test client's session ended the last request with.
+     * Requests carry no cookie, so this is the only handle on the session that was just written.
      */
     private function currentSessionId(): string
     {

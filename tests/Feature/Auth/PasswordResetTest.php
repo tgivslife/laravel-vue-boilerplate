@@ -199,8 +199,8 @@ class PasswordResetTest extends TestCase
         $this->performReset($user->email, $token)->assertStatus(200);
 
         // A reset is the recovery path: no session may predate it.
-        $this->assertDatabaseMissing('user_sessions', ['user_id' => $user->getKey()]);
-        $this->assertFalse($this->sessionExists($sessionId));
+        $this->assertSame(0, $this->liveSessionCount($user));
+        $this->assertSessionRevoked($sessionId);
     }
 
     public function test_token_is_single_use(): void

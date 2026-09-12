@@ -357,7 +357,7 @@ return [
     | App-owned index of which sessions belong to which user (SessionRegistry / user_sessions table),
     | maintained because session drivers store sessions as opaque records with no per-user index.
     | `touch_minutes` throttles how often a registry row is refreshed, so we don't add a write to every request.
-    | Stale rows are pruned lazily on read and swept by auth:purge-session-registry.
+    | Rows whose session is gone are left out of listings and swept by auth:purge-session-registry.
     |
     */
 

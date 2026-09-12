@@ -12,17 +12,15 @@ use Illuminate\Auth\Events\Lockout;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Laravel\Sanctum\PersonalAccessToken;
+use Throwable;
 
 /**
- * Base authentication service with failure-counting throttling and a
- * credential-driven logout.
+ * Base authentication service: the shared brute-force throttle and logout, around a strategy's {@see attemptLogin()}.
  *
- * Login strategies implement {@see attemptLogin()}; the brute-force throttle and logout are shared.
- * Throttling counts only failed attempts (incremented on failure, cleared on success),
- * so legitimate users never accrue lockout pressure - and because it runs after Form Request validation rather than as
- * route middleware, it can never see malformed input.
- * Logout tears down whichever credential actually authenticated the request, rather than
- * relying on the Origin/Referer detection used to pick the service.
+ * The throttle counts failed attempts only (cleared on success), so legitimate users never accrue lockout pressure,
+ * and runs after Form Request validation rather than as route middleware, so it never sees malformed input.
+ * Logout tears down whichever credential actually authenticated the request - session, with its registry row
+ * dropped first, or personal access token - rather than relying on the Origin/Referer detection that picks the service.
  */
 abstract class AuthService implements AuthServiceContract
 {
@@ -33,10 +31,8 @@ abstract class AuthService implements AuthServiceContract
     /**
      * Authenticate the given credentials, enforcing the failure lockout.
      *
-     * Returns `accountLocked` before touching credentials once the email/IP
-     * pair has exceeded `security.lockout.max_attempts`. Otherwise delegates to
-     * the strategy-specific {@see attemptLogin()}, then clears the counter on
-     * success or increments it on invalid credentials.
+     * Answers `accountLocked` without touching credentials once the email/IP pair has exceeded `security.lockout.max_attempts`;
+     * otherwise runs {@see attemptLogin()}, then clears the counter on success or increments it on invalid credentials.
      */
     public function login(LoginPayload $loginPayload): LoginResult
     {
@@ -65,21 +61,21 @@ abstract class AuthService implements AuthServiceContract
     }
 
     /**
-     * Attempt authentication with a specific strategy (session or token).
+     * Attempt authentication the strategy's way (session or token); the lockout is already enforced.
      */
     abstract protected function attemptLogin(LoginPayload $loginPayload): LoginResult;
 
     /**
      * Revoke the active access token and/or terminate the session.
      *
-     * Deletes the personal access token when the request was authenticated
-     * with a bearer token. When a session is present, it is invalidated and
-     * the CSRF token regenerated to prevent fixation on the new session.
+     * A bearer-authenticated request loses its personal access token. A session is invalidated and its CSRF token
+     * regenerated, its registry row dropped first, before anything local changes: a row left live would take a late
+     * write of the session back as signed in, so a logout that cannot drop it fails outright, for the user to retry.
+     * A borrowed session (admin impersonation) signs out through the impersonation teardown instead, which writes
+     * the ended audit entry and leaves the target's remember token alone - a plain logout would cycle it and sign
+     * the target out of their own remembered devices.
      *
-     * A borrowed session (admin impersonation) signs out through the
-     * impersonation teardown instead: the audit trail gets its ended entry,
-     * and the target's remember token survives - a plain logout would cycle
-     * it, silently signing the target out of their own remembered devices.
+     * @throws Throwable When the registry row cannot be dropped.
      */
     public function logout(Request $request): void
     {
@@ -96,6 +92,8 @@ abstract class AuthService implements AuthServiceContract
         if (app(ImpersonationService::class)->abandon($request)) {
             return;
         }
+
+        app(SessionRegistry::class)->forgetCurrent($request);
 
         Auth::guard('web')->logout();
         $request->session()->invalidate();

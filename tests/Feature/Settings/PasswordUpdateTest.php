@@ -4,7 +4,6 @@ namespace Tests\Feature\Settings;
 
 use App\Notifications\PasswordChangedNotification;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
@@ -106,10 +105,9 @@ class PasswordUpdateTest extends TestCase
             'password_confirmation' => 'new-sturdy-passphrase',
         ])->assertStatus(200);
 
-        $this->assertDatabaseMissing('user_sessions', ['session_id' => $otherSessionId]);
-        $this->assertFalse($this->sessionExists($otherSessionId));
+        $this->assertSessionRevoked($otherSessionId);
         // The current session survives the purge.
-        $this->assertSame(1, DB::table('user_sessions')->where('user_id', $user->getKey())->count());
+        $this->assertSame(1, $this->liveSessionCount($user));
     }
 
     public function test_password_change_can_keep_other_sessions(): void

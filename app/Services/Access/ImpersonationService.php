@@ -3,6 +3,7 @@
 namespace App\Services\Access;
 
 use App\Models\User;
+use App\Services\Auth\SessionRegistry;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Http\Request;
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
+use Throwable;
 
 /**
  * Signing in as another account: a same-session identity swap, bracketed by audit entries.
@@ -105,15 +107,15 @@ readonly class ImpersonationService
 
         $actor = $this->actor($state);
 
-        $this->auditEnd($actor, $request->user());
-
-        $request->session()->forget(self::SESSION_KEY);
-
         if (!$this->vouches($actor, $state)) {
-            $this->destroySession($request);
+            $this->tearDown($actor, $request);
 
             return null;
         }
+
+        $this->auditEnd($actor, $request->user());
+
+        $request->session()->forget(self::SESSION_KEY);
 
         $this->swapTo($actor, $request);
 
@@ -178,13 +180,20 @@ readonly class ImpersonationService
     }
 
     /**
-     * Close the audit window, drop the marker and destroy the borrowed session, in that order.
+     * Drop the registry row, close the audit window, destroy the borrowed session, in that order.
+     *
+     * The row first, while nothing has changed: a failure there leaves the borrowed session exactly as it was,
+     * marker and restrictions included, instead of saved as the target's own with no row to revoke it by. The ended
+     * entry next: should the session outlive it, the missing row signs it out on its next request.
+     *
+     * @throws Throwable When the registry row cannot be dropped.
      */
     private function tearDown(?User $actor, Request $request): void
     {
+        $this->sessionRegistry()->forgetCurrent($request);
+
         $this->auditEnd($actor, $request->user());
 
-        $request->session()->forget(self::SESSION_KEY);
         $this->destroySession($request);
     }
 
@@ -242,7 +251,7 @@ readonly class ImpersonationService
     }
 
     /**
-     * Destroy the borrowed session outright, leaving no one signed in.
+     * Drop the marker and destroy the borrowed session outright, leaving no one signed in.
      *
      * logoutCurrentDevice() rather than logout(): a full logout would cycle the target's remember token and sign them out
      * of their own devices, and the borrowed session never held a remember cookie anyway.
@@ -250,11 +259,21 @@ readonly class ImpersonationService
      */
     private function destroySession(Request $request): void
     {
+        $request->session()->forget(self::SESSION_KEY);
         $request->attributes->set(self::SWAP_ATTRIBUTE, true);
 
         Auth::guard('web')->logoutCurrentDevice();
         $request->session()->invalidate();
         $request->session()->regenerateToken();
+    }
+
+    /**
+     * Resolved on use: the registry reads the marker through this service to file borrowed sessions under the actor,
+     * so injecting it here would close a constructor cycle.
+     */
+    private function sessionRegistry(): SessionRegistry
+    {
+        return app(SessionRegistry::class);
     }
 
     /**

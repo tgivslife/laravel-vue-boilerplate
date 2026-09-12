@@ -343,7 +343,7 @@ class AccessUserManagementTest extends AccessTestCase
         $this->assertTrue($target->require_password_reset);
         $this->assertTrue(Hash::check($temporaryPassword, $target->password));
         // The old credential stops working everywhere at once.
-        $this->assertDatabaseMissing('user_sessions', ['session_id' => $sessionId]);
+        $this->assertSessionRevoked($sessionId);
         $this->assertDatabaseHas('access_audit_logs', ['action' => 'user.password_reset_forced']);
     }
 
@@ -400,7 +400,7 @@ class AccessUserManagementTest extends AccessTestCase
         $this->assertSoftDeleted('users', ['id' => $target->id]);
         $this->assertSame(0, $target->tokens()->count());
         $this->assertDatabaseMissing('magic_link_tokens', ['user_id' => $target->id]);
-        $this->assertDatabaseMissing('user_sessions', ['session_id' => $sessionId]);
+        $this->assertSessionRevoked($sessionId);
         $this->assertDatabaseMissing('user_identities', ['user_id' => $target->id]);
         $this->assertDatabaseHas('access_audit_logs', ['action' => 'user.deleted']);
 

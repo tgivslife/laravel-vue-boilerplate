@@ -5,13 +5,15 @@ use App\Http\Middleware\AttachRequestId;
 use App\Http\Middleware\EnsureJsonApiRequest;
 use App\Http\Middleware\EnsurePasswordResetNotRequired;
 use App\Http\Middleware\EnsureSessionAuthenticated;
+use App\Http\Middleware\EnsureSessionRegistered;
 use App\Http\Middleware\EnsureTwoFactorEnrolled;
 use App\Http\Middleware\EnsureUserCanAuthenticate;
-use App\Http\Middleware\RecordSessionActivity;
+use App\Http\Middleware\RegisterSession;
 use App\Http\Middleware\SetRequestLocale;
 use App\Http\Middleware\SetSecurityHeaders;
 use App\Http\Responses\JsonErrorResponse;
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -58,12 +60,13 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->prependToGroup('api', AttachRequestId::class);
 
         /*
-         * Keeps the user-session registry in sync so sessions can be listed
-         * and revoked on any session driver. Appended so it runs inside the
-         * session/auth stack (statefulApi for api, StartSession for web).
+         * Session registry: the check signs out a session the registry revoked before the auth middleware can accept it,
+         * hence its place ahead of authentication in the priority list; the registration runs after the response, so it sees the final session id.
+         * Both appended, to run inside the session stack (statefulApi for api, StartSession for web).
          */
-        $middleware->appendToGroup('web', RecordSessionActivity::class);
-        $middleware->appendToGroup('api', RecordSessionActivity::class);
+        $middleware->appendToGroup('web', [EnsureSessionRegistered::class, RegisterSession::class]);
+        $middleware->appendToGroup('api', [EnsureSessionRegistered::class, RegisterSession::class]);
+        $middleware->prependToPriorityList(AuthenticatesRequests::class, EnsureSessionRegistered::class);
 
         /*
          * Sanctum's token-ability gates, for routes that require a token scoped with a given permission name.

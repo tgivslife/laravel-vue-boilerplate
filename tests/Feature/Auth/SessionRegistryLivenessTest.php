@@ -77,10 +77,10 @@ class SessionRegistryLivenessTest extends TestCase
         $live = $this->registryOn($connection)->forUser($user);
 
         $this->assertSame(['live-session-id'], $live->pluck('session_id')->all());
-        $this->assertSame(
-            ['live-session-id'],
+        // Left out, not deleted: a row is only ever deleted by the sweep, past the liveness horizon.
+        $this->assertEqualsCanonicalizing(
+            ['live-session-id', 'dead-session-id'],
             DB::table('user_sessions')->pluck('session_id')->all(),
-            'the dead session row should be pruned'
         );
     }
 

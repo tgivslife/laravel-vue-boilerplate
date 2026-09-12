@@ -3,6 +3,7 @@
 namespace Tests\Feature\Console;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Redis;
 use Illuminate\Support\Str;
@@ -31,6 +32,33 @@ class FlushSessionsCommandTest extends TestCase
             ->assertSuccessful();
 
         $this->assertSame(0, DB::table('sessions')->count());
+        $this->assertSame(0, DB::table('user_sessions')->count());
+    }
+
+    /**
+     * A flush is "everyone signs in again": a remembered browser must not mint a fresh signed-in session from its remember-me cookie once the store is empty.
+     */
+    public function test_a_flush_invalidates_remember_me_as_well(): void
+    {
+        config(['session.driver' => 'database']);
+        $user = $this->createUser();
+
+        $signIn = $this->withHeader('Referer', config('app.url'))
+            ->postJson('/api/login', ['email' => $user->email, 'password' => 'password', 'remember' => true]);
+        $signIn->assertOk();
+        $this->carryCookieFrom($signIn, Auth::guard('web')->getRecallerName());
+        $this->assertNotNull($user->refresh()->remember_token);
+
+        $this->artisan('auth:flush-sessions', ['--force' => true])
+            ->expectsOutputToContain('Invalidated 1 remember-me tokens.')
+            ->assertSuccessful();
+
+        // Only the remember cookie comes back, as after a browser restart.
+        $this->flushSession();
+        $this->app['auth']->forgetGuards();
+
+        $this->getJson('/api/user')->assertUnauthorized();
+        $this->assertNull($user->refresh()->remember_token);
         $this->assertSame(0, DB::table('user_sessions')->count());
     }
 

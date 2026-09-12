@@ -112,11 +112,26 @@ typed email, for account deletion).
 
 ## Sessions
 
-An app-owned session registry records which sessions belong to which user (session drivers store sessions as opaque
-records with no per-user index); a session borrowed through admin impersonation belongs to the admin, not the target.
-It powers the settings page's session list and
-"sign out other sessions", and the per-user session list in the admin UI. Stale rows are pruned lazily on read and swept
-by `auth:purge-session-registry`.
+An app-owned session registry records which sessions belong to which user, since session drivers store sessions as
+opaque records with no per-user index. It powers the settings page's session list and "sign out other sessions", and
+the per-user session list in the admin UI. A session borrowed through admin impersonation belongs to the admin, not
+the target. Rows whose session is gone are left out of listings and swept by `auth:purge-session-registry`.
+
+The registry row is the session's identity: the session carries its row id in its payload, so the row is found again
+after the session id rotates (an impersonation swap) and on a copy of the session written back under the old id. A
+sign-in on the cookie of a session the store has already forgotten starts a row of its own.
+
+Revocation destroys the session in the store and keeps the row as a tombstone until the sweep: a request that was
+already running on that session writes it back when it finishes, and the tombstone is what signs the next request
+on it out instead of serving it. A session whose row is gone is signed out the same way, since rows only go when
+their session is dead, and so is a signed-in session the registry never recorded. Its writes are therefore not
+optional: a sign-in the registry cannot register fails and is signed out, and a logout that cannot drop its row fails
+with nothing changed, to be retried.
+
+Each row notes whether the browser holds a remember-me cookie. The remember token is one value per account, so
+revoking a remembered session rotates it and ends remember-me on every remembered browser, while revoking a plain
+session leaves it alone. `auth:flush-sessions` empties every remember token before the store, so remembered browsers
+sign in again too.
 
 | Env                              | Default | Meaning                                          |
 |----------------------------------|---------|--------------------------------------------------|

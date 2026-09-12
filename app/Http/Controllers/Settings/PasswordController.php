@@ -15,25 +15,21 @@ use Symfony\Component\HttpFoundation\Response;
 /**
  * Lets the authenticated user change (or first set) their own password.
  *
- * Session-only (EnsureSessionAuthenticated) and rate limited by the
- * password-confirm limiter, since the request verifies the current
- * password for accounts that have one.
+ * Session-only (EnsureSessionAuthenticated) and rate limited by the password-confirm limiter,
+ * since the request verifies the current password for accounts that have one.
  */
 class PasswordController extends Controller
 {
-    public function __construct(
-        private readonly SessionRegistry $sessionRegistry
-    ) {
+    public function __construct(private readonly SessionRegistry $sessionRegistry)
+    {
     }
 
     /**
      * Update the user's password.
      *
-     * A password change prompted by a suspected leak must not leave the
-     * attacker signed in: unless the user opts out, every other session
-     * row is deleted, and the remember token is always rotated so
-     * remembered browsers cannot silently mint fresh sessions either.
-     * The current session stays signed in.
+     * A change prompted by a suspected leak must not leave the attacker signed in: every other session is revoked
+     * unless the user opts out, and the remember token is always rotated so remembered browsers cannot mint fresh
+     * sessions either. The current session stays signed in.
      */
     public function update(PasswordUpdateRequest $request): JsonResponse
     {
@@ -49,13 +45,10 @@ class PasswordController extends Controller
         $user->save();
 
         if ((bool) ($request->validated('revoke_other_sessions') ?? true)) {
-            $this->sessionRegistry->destroyOthers($user, $request->session()->getId());
+            $this->sessionRegistry->destroyOthers($user, $request);
         }
 
-        /*
-         * Fired for the settings path too, so a single listener (SendPasswordChangedNotification) mails the owner about
-         * every password change, whichever door it came through.
-         */
+        // Fired here too, so one listener (SendPasswordChangedNotification) mails the owner whichever door the change came through.
         event(new PasswordReset($user));
 
         return new JsonSuccessResponse(

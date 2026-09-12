@@ -53,21 +53,16 @@ class SessionController extends Controller
     /**
      * Sign out every session except the current one.
      *
-     * The remember token is rotated as well: remembered browsers hold a
-     * recaller cookie that would otherwise silently mint a fresh session.
-     * This costs the current browser its own remember-me, which is the
-     * price of making "everywhere else" mean it.
+     * The remember token is rotated first, so a recaller arriving between the two steps meets a dead token: remembered
+     * browsers would otherwise mint a fresh session.
+     * The current browser loses its own remember-me too, the price of "everywhere else" meaning it.
      */
     public function destroyOthers(SessionsDestroyOthersRequest $request): JsonResponse
     {
         $user = $request->user();
 
-        $this->sessionRegistry->destroyOthers($user, $request->session()->getId());
-
-        User::withoutTimestamps(function () use ($user): void {
-            $user->setRememberToken(Str::random(60));
-            $user->saveQuietly();
-        });
+        $this->rotateRememberToken($user);
+        $this->sessionRegistry->destroyOthers($user, $request);
 
         return new JsonSuccessResponse(
             status: Response::HTTP_OK,
@@ -77,10 +72,12 @@ class SessionController extends Controller
     }
 
     /**
-     * Sign out one of the user's other sessions, addressed by digest.
+     * Sign out one of the user's other sessions, addressed by digest. The current one is refused: signing yourself
+     * out belongs to the logout endpoint.
      *
-     * The current session is deliberately refused - signing yourself out
-     * belongs to the logout endpoint, not here.
+     * A remembered session would sign itself straight back in with its cookie, so revoking one rotates the remember
+     * token first, for a recaller arriving in between to meet a dead token.
+     * The token is one per account, so every remembered browser loses remember-me; revoking a plain session leaves it alone.
      */
     public function destroy(Request $request, string $sessionId): JsonResponse
     {
@@ -95,7 +92,7 @@ class SessionController extends Controller
             )->toResponse($request);
         }
 
-        if (hash_equals($request->session()->getId(), (string) $session->session_id)) {
+        if ((int) $session->id === $this->sessionRegistry->currentRowId($request)) {
             return new JsonErrorResponse(
                 title: __('api.errors.titles.validation_failed'),
                 status: Response::HTTP_UNPROCESSABLE_ENTITY,
@@ -103,10 +100,25 @@ class SessionController extends Controller
             )->toResponse($request);
         }
 
-        $this->sessionRegistry->destroy($request->user(), (string) $session->session_id);
+        if ((bool) $session->remembered) {
+            $this->rotateRememberToken($request->user());
+        }
+
+        $this->sessionRegistry->destroy($request->user(), (int) $session->id);
 
         return new JsonSuccessResponse(
             status: Response::HTTP_NO_CONTENT,
         )->toResponse($request);
+    }
+
+    /**
+     * Invalidate every remember-me cookie the user holds, without counting it as a profile update.
+     */
+    private function rotateRememberToken(User $user): void
+    {
+        User::withoutTimestamps(function () use ($user): void {
+            $user->setRememberToken(Str::random(60));
+            $user->saveQuietly();
+        });
     }
 }

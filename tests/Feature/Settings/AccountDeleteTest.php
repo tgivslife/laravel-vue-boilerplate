@@ -4,10 +4,9 @@ namespace Tests\Feature\Settings;
 
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Session\ArraySessionHandler;
 use Illuminate\Support\Facades\Exceptions;
 use RuntimeException;
-use SessionHandlerInterface;
+use Tests\Support\ObservableSessionHandler;
 use Tests\TestCase;
 
 class AccountDeleteTest extends TestCase
@@ -37,8 +36,8 @@ class AccountDeleteTest extends TestCase
         $response->assertStatus(200);
         $this->assertSoftDeleted($user);
         $this->assertSame(0, $user->tokens()->count());
-        $this->assertDatabaseMissing('user_sessions', ['user_id' => $user->getKey()]);
-        $this->assertFalse($this->sessionExists($otherSessionId));
+        $this->assertSame(0, $this->liveSessionCount($user));
+        $this->assertSessionRevoked($otherSessionId);
 
         // Identity links die with the account: a dead account must not squat
         // its provider subject against a future re-registration.
@@ -160,50 +159,11 @@ class AccountDeleteTest extends TestCase
         $otherSessionId = $this->createOtherSessionFor($user);
 
         // The store fails on exactly the sweep's target, so the request's own session keeps working.
-        $this->app['session']->extend('failing', static fn() => new class(
-            new ArraySessionHandler(120), $otherSessionId
-        ) implements SessionHandlerInterface {
-            public function __construct(
-                private readonly SessionHandlerInterface $inner,
-                private readonly string $failingId
-            ) {
-            }
-
-            public function open(string $path, string $name): bool
-            {
-                return $this->inner->open($path, $name);
-            }
-
-            public function close(): bool
-            {
-                return $this->inner->close();
-            }
-
-            public function read(string $id): string|false
-            {
-                return $this->inner->read($id);
-            }
-
-            public function write(string $id, string $data): bool
-            {
-                return $this->inner->write($id, $data);
-            }
-
-            public function destroy(string $id): bool
-            {
-                if ($id === $this->failingId) {
-                    throw new RuntimeException('session store unavailable');
-                }
-
-                return $this->inner->destroy($id);
-            }
-
-            public function gc(int $max_lifetime): int|false
-            {
-                return $this->inner->gc($max_lifetime);
+        ObservableSessionHandler::install(static function (string $id) use ($otherSessionId): void {
+            if ($id === $otherSessionId) {
+                throw new RuntimeException('session store unavailable');
             }
         });
-        config(['session.driver' => 'failing']);
 
         $this->actingAsStateful($user)
             ->deleteJson('/api/account', ['password' => 'password'])
